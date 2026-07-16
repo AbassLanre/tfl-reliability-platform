@@ -1,0 +1,13 @@
+line_id,line_name,mode
+bakerloo,Bakerloo,tube
+central,Central,tube
+circle,Circle,tube
+district,District,tube
+hammersmith-city,Hammersmith & City,tube
+jubilee,Jubilee,tube
+metropolitan,Metropolitan,tube
+northern,Northern,tube
+piccadilly,Piccadilly,tube
+victoria,Victoria,tube
+waterloo-city,Waterloo & City,tube
+elizabeth,Elizabeth line,elizabeth-line

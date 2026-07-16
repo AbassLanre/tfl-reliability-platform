@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: raw
+    database: TFL_DEV
+    schema: RAW
+    tables:
+      - name: tube_lines

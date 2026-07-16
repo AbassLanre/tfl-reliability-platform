@@ -1,0 +1,13 @@
+tfl_reliability:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: WBGCTLM-QP79037
+      user: PERCYABS
+      private_key_path: "C:/Users/user/.snowflake/keys/snowflake_key.p8"
+      role: ACCOUNTADMIN   
+      database: TFL_DEV
+      warehouse: TFL_DEV_WH
+      schema: STAGING
+      threads: 4

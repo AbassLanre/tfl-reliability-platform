@@ -1,0 +1,16 @@
+# dbt project config — the file dbt looks for to know "this folder is a dbt project"
+name: tfl_reliability
+version: "1.0.0"
+config-version: 2
+
+# must match the profile name in profiles.yml
+profile: tfl_reliability
+
+model-paths: ["models"]
+target-path: "target"          # compiled SQL lands here (gitignored)
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  tfl_reliability:
+    staging:
+      +materialized: view
