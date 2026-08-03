@@ -181,3 +181,10 @@ The point is parallelism without duplication: three consumers in a group on a th
 no partition is left unread, kafka must serve every partition to someone in the group
 
 keyless messages are sticky-batched to one partition — saw one consumer get everything.
+
+a worker dies, the team absorbs its workload automatically.
+
+rebalance — another consumer picks up its partitions from the last committed offset
+
+the tfl producer key messages by line_id so the messages are grouped according to the key and preserves per-line order within the same partition
+no data is lost when a consumer dies because of rebalancing, another consumer picks up the partition from the last commited offset
