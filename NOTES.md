@@ -227,3 +227,7 @@ Topic: tfl.line-status  TopicId: QEJ850afSUmhfv5FLhZz4A PartitionCount: 1       
         Topic: tfl.line-status  Partition: 0    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
 
 killed docker and tried restarting it after saving the volume info into docker-compose.yml but it failed to start becuse of permisiion issues, so had to set appuser to uid 1000
+
+when testing the config.py file, i had to run it in venv
+python -c "from ingestion.producer import config; print(config.KAFKA_BOOTSTRAP, len(config.TUBE_LINES))"
+
