@@ -188,3 +188,42 @@ rebalance — another consumer picks up its partitions from the last committed o
 
 the tfl producer key messages by line_id so the messages are grouped according to the key and preserves per-line order within the same partition
 no data is lost when a consumer dies because of rebalancing, another consumer picks up the partition from the last commited offset
+
+in week 3
+kept mode_name in the schema cus i wanted to leave it for future use case
+
+Ordering. Messages with the same key always land in the same partition (hash(line_id) % N), so events for the victoria line stay in order no matter what N is. Ordering doesn't force your choice here.
+Parallelism cap. One partition can be read by at most one consumer in a group — you watched this in the rebalance drill. So N = the maximum number of consumers that could ever share the work. N=1 means one reader forever; N=6 means up to six.
+
+Supermarket analogy: partitions are checkout lanes. The same customer always joins the same lane (that's the key), so their items stay in order. More lanes means more cashiers could work at once — but lanes nobody queues in are just floor space you're paying for.
+
+venv = isolates what pip install puts in; Docker = isolates what docker run starts up. Neither contains the other.
+
+status - 1 partition count (the status wouldn't change as much within a short time period)
+arrivals - 11 partition count (because 11 distinct keys means 11 partitions is the most parallelism that could ever be useful, one consumer per line's worth of traffic, so I set the ceiling at the theoretical max, which costs nothing at this scale)
+disruptions -1 partition count (here also there wouldn't be much change)
+
+docker exec -it kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic tfl.arrivals --partitions 11 --replication-factor 1
+
+docker exec -it kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic tfl.line-status --partitions 1 --replication-factor 1
+
+docker exec -it kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic tfl.disruptions --partitions 1 --replication-factor 1
+
+Topic: tfl.disruptions  TopicId: qbHVus_-QCOJgDIlTXfsZQ PartitionCount: 1       ReplicationFactor: 1    Configs: min.insync.replicas=1,segment.bytes=1073741824
+        Topic: tfl.disruptions  Partition: 0    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+Topic: tfl.arrivals     TopicId: IZ0cZwPwSuO6gkiHC_2cWw PartitionCount: 11      ReplicationFactor: 1    Configs: min.insync.replicas=1,segment.bytes=1073741824
+        Topic: tfl.arrivals     Partition: 0    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 1    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 2    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 3    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 4    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 5    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 6    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 7    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 8    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 9    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+        Topic: tfl.arrivals     Partition: 10   Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+Topic: tfl.line-status  TopicId: QEJ850afSUmhfv5FLhZz4A PartitionCount: 1       ReplicationFactor: 1    Configs: min.insync.replicas=1,segment.bytes=1073741824
+        Topic: tfl.line-status  Partition: 0    Leader: 1       Replicas: 1     Isr: 1  Elr:    LastKnownElr:
+
+killed docker and tried restarting it after saving the volume info into docker-compose.yml but it failed to start becuse of permisiion issues, so had to set appuser to uid 1000
