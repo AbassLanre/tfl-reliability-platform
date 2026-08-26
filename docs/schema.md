@@ -7,7 +7,7 @@
 | event_type     | string        | yes      | producer (e.g. "arrival")    |
 | ingested_at    | string (ISO8601 UTC) | yes | producer clock            |
 | event_ts     | string | yes      | timestamp |
-| lastUpdate     | string | yes      | producer |
+<!-- | lastUpdate     | string | yes      | producer | -->
 
 ## tfl.arrivals payload
 

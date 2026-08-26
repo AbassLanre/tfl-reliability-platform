@@ -4,19 +4,19 @@
     "category": "RealTime",
     "type": "lineInfo",
     "categoryDescription": "RealTime",
-    "description": "Central Line: Minor delays due to train cancellations. ",
+    "description": "Bakerloo Line: Severe delays due to an earlier faulty train Lambeth North. Tickets are being accepted on London Buses, Lioness line and Thameslink services. ",
     "affectedRoutes": [],
     "affectedStops": [],
-    "closureText": "minorDelays"
+    "closureText": "severeDelays"
   },
   {
     "$type": "Tfl.Api.Presentation.Entities.Disruption, Tfl.Api.Presentation.Entities",
     "category": "RealTime",
     "type": "lineInfo",
     "categoryDescription": "RealTime",
-    "description": "Victoria Line: Severe delays due to an earlier person ill on a train at Green Park. Tickets are being accepted on London Buses, London Overground, Great Northern, Thameslink, Greater Anglia, South Western Railway and Southeastern services. ",
+    "description": "Central Line: Minor delays due to train cancellations. ",
     "affectedRoutes": [],
     "affectedStops": [],
-    "closureText": "severeDelays"
+    "closureText": "minorDelays"
   }
 ]

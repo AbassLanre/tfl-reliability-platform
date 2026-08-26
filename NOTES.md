@@ -231,3 +231,14 @@ killed docker and tried restarting it after saving the volume info into docker-c
 when testing the config.py file, i had to run it in venv
 python -c "from ingestion.producer import config; print(config.KAFKA_BOOTSTRAP, len(config.TUBE_LINES))"
 
+1. Timeouts are not optional. requests.get() with no timeout will wait forever — if TfL stops responding mid-connection, your producer just silently freezes, and tonight's 2-hour unattended run collects nothing. Every request gets timeout=10. A producer that dies noisily beats one that hangs quietly — this is the same fail-fast philosophy as your config.
+
+2. Not every error deserves a retry. Sort responses into three buckets: success (2xx) — return the data; transient trouble (429 "slow down", or any 5xx server error, or a network drop) — worth retrying, because it'll probably pass; and our own fault (404, 401 — wrong URL, bad key) — retrying identical junk gets identical junk, so raise immediately and let a human fix it. Retrying a 404 is one of the most common junior mistakes in ingestion code.
+
+3. Back off exponentially. When you retry, wait 1s, then 2s, then 4s. Hammering a struggling server at full speed makes you part of its problem — and with a 429 it can get your key throttled harder. Doubling the gap gives the other side room to recover. (Production systems add random jitter so a thousand clients don't all retry in sync — say that in an interview and smile; with one laptop you don't need it.)
+
+# tfl.arrivals table. raw["..."] if required, raw.get("...") if optional.
+
+tried running python scripts\test_transform.py in the terminal butit said no module called ingestion found, this is because it was looking for a module in scripts\....
+
+fix is to use python -m scripts.test_transform

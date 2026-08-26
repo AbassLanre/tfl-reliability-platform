@@ -20,4 +20,26 @@ DISRUPTION_POLL_S = int(os.getenv("DISRUPTION_POLL_S","60"))
 TFL_BASE_URL = os.getenv("TFL_BASE_URL","https://api.tfl.gov.uk")
 
 # --- constants (not configurable - the tube map doesn't change via env var) ---
-TUBE_LINES = ["bakerloo", "central", "circle", "district", "hammersmith-city", "jubilee", "metropolitan", "northern", "piccadilly", "victoria", "waterloo-city", "elizabeth"]
+TUBE_LINES = ["bakerloo", "central", "circle", "district", "hammersmith-city", "jubilee", "metropolitan", "northern", "piccadilly", "victoria", "waterloo-city" ]
+TFL_MODES = [
+  "bus",
+  "tube",
+  "cable-car",
+  "coach",
+  "cycle",
+  "cycle-hire",
+  "dlr",
+  "elizabeth-line",
+  "goods",
+  "interchange-keep-sitting",
+  "interchange-secure",
+  "national-rail",
+  "overground",
+  "replacement-bus",
+  "river-bus",
+  "river-tour",
+  "taxi",
+  "tflrail",
+  "tram",
+  "walking"
+]
