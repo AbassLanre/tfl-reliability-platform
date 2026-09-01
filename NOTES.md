@@ -242,3 +242,55 @@ python -c "from ingestion.producer import config; print(config.KAFKA_BOOTSTRAP, 
 tried running python scripts\test_transform.py in the terminal butit said no module called ingestion found, this is because it was looking for a module in scripts\....
 
 fix is to use python -m scripts.test_transform
+
+So the first p.poll(1) doesn't "wake" anything — the messages were already gone; it just ran the confirmations that had accumulated. Distinction to keep: I/O happens on their thread; callbacks happen on yours.
+
+(.venv) PS C:\Users\user\Documents\tfl-reliability-platform> python -m ingestion.producer.main
+2026-09-01 13:12:32,735 INFO producer: arrivals: produced 3451
+2026-09-01 13:12:32,802 INFO producer: line status: produced 14
+2026-09-01 13:12:32,803 INFO producer: line status: skipped 0
+2026-09-01 13:12:33,764 INFO producer: disruptions: produced 8
+2026-09-01 13:12:33,765 INFO producer: disruptions: skipped 0
+2026-09-01 13:13:03,679 INFO producer: arrivals: produced 3475
+2026-09-01 13:13:31,157 INFO producer: line status: produced 0
+2026-09-01 13:13:31,158 INFO producer: line status: skipped 14
+2026-09-01 13:13:32,380 INFO producer: disruptions: produced 0
+2026-09-01 13:13:32,381 INFO producer: disruptions: skipped 8
+
+Arrivals offset:
+(.venv) PS C:\Users\user\Documents\tfl-reliability-platform> docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --topic tfl.arrivals --bootstrap-server localhost:9092
+tfl.arrivals:0:6333
+tfl.arrivals:1:10164
+tfl.arrivals:10:20665
+tfl.arrivals:2:4861
+tfl.arrivals:3:0
+tfl.arrivals:4:12761
+tfl.arrivals:5:3876
+tfl.arrivals:6:76
+tfl.arrivals:7:2081
+tfl.arrivals:8:4018
+tfl.arrivals:9:0
+
+line-status offset:
+(.venv) PS C:\Users\user\Documents\tfl-reliability-platform> docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --topic tfl.line-status --bootstrap-server localhost:9092
+tfl.line-status:0:91
+
+disruptions offset:
+(.venv) PS C:\Users\user\Documents\tfl-reliability-platform> docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --topic tfl.disruptions --bootstrap-server localhost:9092
+tfl.disruptions:0:45
+
+1. Ordering (re-test). Your producer keys every message by line_id. Explain precisely what ordering Kafka guarantees for your arrivals data — and just as precisely, what it does not guarantee. Where does the guarantee physically come from?
+
+Q1 — half marks. The mechanism is right: hash(key) % N picks the partition, and within a partition order is preserved. But I asked for what's not guaranteed too, and that half is where interviews are won: there is no ordering across partitions — a Victoria message and a Jubilee message have no defined order relative to each other, and even two keys that share a partition interleave without cross-key promises. And the "where does it physically come from" bit: each partition is an append-only log with a single leader broker appending in arrival order — order isn't computed, it's just the order things were written down. Say the negative half unprompted next time; it's what separates "used Kafka" from "understands Kafka".
+
+2. Rebalancing and delivery (re-test, extended). In Week 3, a Spark consumer group will read tfl.arrivals. One consumer crashes mid-batch — walk me through what happens: who takes over, where do they resume from, and which messages (if any) get processed twice? Name the delivery model.
+
+Q2 — half marks. Takeover ✓, resume from last committed offset ✓. But the two-part sting was the point: messages the dead consumer processed but hadn't committed get processed again by the survivor — and the model has a name you should say out loud: at-least-once delivery. You had this cold three weeks ago in the rebalance drill; it's rusted slightly. It matters because it's the setup for Q3..
+
+3. This week's material. Your deduper is a Python set in memory. Tomorrow morning you restart the producer. What happens on its first status poll after the restart, and why is that acceptable — what property must downstream consumers have anyway, and what single Kafka fact makes that property non-negotiable regardless of your dedupe?
+
+Q3 — no marks, so let's fix it properly. "A confirmation is sent" — no, nothing of the sort exists; that was a guess, and in an interview a guess dressed as an answer costs more than "I'm not sure, let me reason it out". Reason it out now: the deduper's memory is a Python set. Where does a Python set live? In the process's RAM. Restart the process → RAM gone → the set is empty, exactly like the very first run. So the first status poll after restart matches nothing, and all 14 statuses get re-sent as duplicates into the topic. Why is that acceptable? Because your consumers already can't assume no-duplicates — Q2 just established that Kafka itself re-delivers on crash-and-resume. At-least-once is the contract of the whole pipeline; your dedupe only reduces duplicates, it can't eliminate them, so downstream must be idempotent — able to see the same event twice and produce the same result. One sentence ties it together: "dedupe is an optimisation, idempotent consumers are the correctness guarantee." That's also precisely why the crude clear() in your Deduper was acceptable — re-sends are already survivable by design.
+
+4. Design defence. An interviewer looks at your repo and asks: "You've got two timestamps in every message and you split one TfL status response into multiple Kafka messages. Why?" Defend both decisions in under a minute each.
+
+Q4 — pass. Both timestamps named correctly; grain reason correct. Sharpen each with its consequence for the marks you dropped: two timestamps because Spark windows on event time, and late-arriving data would land in the wrong window on ingestion time; exploded grain so every consumer gets flat scalar fields instead of unpacking a list forever.
