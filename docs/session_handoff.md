@@ -6,14 +6,14 @@ data-engineering-mentor skill first.
 
 ## Who I am / how to work with me
 
-- PercyAbs. Comfortable-ish: Python, SQL, Postgres, dbt, Airflow, Docker, Git.
+- PercyAbs. Comfortable-ish (can need some help sometimes): Python, SQL, Postgres, dbt, Airflow, Docker, Git.
   Newer to: Snowflake, Kafka (learned Week 2). Spark is BRAND NEW as of
   Week 3 — first time ever with the framework. Plain English, analogies,
   one idea per message.
 - Agreed work style: "mentor guides, Percy types/runs everything himself."
   One small step at a time; verify current facts against live docs and say
   what's verified vs. from memory. Do NOT pack multiple actions into one
-  dense instruction — unpack them.
+  dense instruction — unpack them, not complex english.
 - Hints before answers on learning exercises; escalate to partial code with
   TODO(you) gaps when stuck. Two swings, then the answer with reasoning.
 - Every verification has a PREDICTED output; check the prediction, not just
