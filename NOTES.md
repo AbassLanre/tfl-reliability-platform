@@ -294,3 +294,70 @@ Q3 — no marks, so let's fix it properly. "A confirmation is sent" — no, noth
 4. Design defence. An interviewer looks at your repo and asks: "You've got two timestamps in every message and you split one TfL status response into multiple Kafka messages. Why?" Defend both decisions in under a minute each.
 
 Q4 — pass. Both timestamps named correctly; grain reason correct. Sharpen each with its consequence for the marks you dropped: two timestamps because Spark windows on event time, and late-arriving data would land in the wrong window on ingestion time; exploded grain so every consumer gets flat scalar fields instead of unpacking a list forever.
+
+
+Spark:
+
+It has 4 ideas in it
+-- Event time vs Processing time
+event time is the time from tfl itself, the time a event happened e.g event_ts
+processing time is the time it landed at the receiving end e. ingested_at
+event time is reproducible while processing time isn't
+
+in our project, event time quality differs per topic, arrival has the real/true event time from tfl line-status has none so event_ts=ingested_at and disruptions is lastUpdate or fall back to now
+
+-- Idea 2 Watermarks - deadline
+you set the deadline and not rely solely on the event_ts
+watermark = latest event_ts seen - delay
+watermark delay n quantities that data less than N late will not be aggregated
+
+you will have to measure the distribution before you can give a delay value
+watermark delay is a measured decision and not a guess, typical skew is 43 secs but the tail is unknown so we have to measure p99
+
+watermark      = newest event_ts seen so far  −  delay
+window closes  when  watermark ≥ window end
+event dropped  if it belongs to a window that has already closed
+
+in my own words I'd say watermark is the newest event time  seen after you take away the chosen delay  i.e a window of 8:10-8:20 having a 5 minute water mark and the last seen event was 8:23, with the 5 minute watermark, you have 8:18 which falls within the window therefore the window is not closed and if an event of 8:19comes, it won't get dropped but if the last seen was 8:26 and a 8:15 event comes, it'd be dropped because the watermark has passed the window
+
+Without a watermark, Spark has to keep every window in memory forever in case a late event turns up. The watermark is the deadline that lets it throw old windows away
+
+newest seen   = 08:06
+watermark     = 08:06 − 3 min = 08:03
+window end    = 08:05
+08:03 > 08:05?   No  →  window still open
+08:04 arrives  →  belongs to an open window  →  COUNTED
+
+
+-- idea 3
+Window - quick one
+basically 8:00-8:05
+two types:
+Tumbling - fixed, back to back e.g 8:00-8:05, 8:05-8:10....
+sliding - overlapping e.g 8:00-8:10, 8:05-8:15, 8:10:8:20....
+
+-- idea 4
+Micro batches
+This is about how often
+spark does not process event one at a time as the event arrives but instead runs a loop
+
+-Wait for a trigger (say, every 10 seconds).
+-Grab everything that arrived in Kafka since last time — that's one micro-batch.
+-Process that batch as if it were a small ordinary DataFrame.
+-Write results, save progress, go back to 1.
+
+it runs forever, basically a batch that runs forever in small chunks. latency is bound by trigger interval.
+
+-- In one sentence each: what is event time, what is processing time, and which one gives reproducible results on replay?
+-- Explain watermarks to me as if I'm a junior who's never heard the term. Use a concrete example with real times. Aim for the length of a two-minute spoken answer — roughly a paragraph.
+-- Why can't the watermark just use the wall clock instead of the newest event time seen?
+-- Tumbling vs sliding windows, one line each, and which one you're using and why.
+-- "Is Spark true streaming?" — answer it the way you'd answer an interviewer.
+-- Bonus, the sting: it's 3am, the tube is closed, no events are arriving. What happens to your watermark and your open windows?
+
+1. event time is the time from source i.e the time recorded by tfl, processing time is the time it lands, the time the producer polled it from the api, only the event time is reproducible
+2. Watermark is basically just the time from when the newest last seen event minuses the set delay period, if i have a delay of 5 min, and a window of 8:20-8:30, and last seen of 8:35, and an event of 8:29 comes, i get a watermark of 8:35-5 min which is 8:30 and this watermark has not passed the end so the window doesn't close and 8:29 doesn't get dropped but if the last seen event was 8:36, then the window will get closed and 8:29 gets dropped
+3. the watermark can't use the wall clock because we need o be able to reproduce the result
+4. Tumbling is fixed or back to back and sliding is overlapping, we are using tumbling because it doesn't overlap but addup for when we work hourly, a 12 minutes window sum into one hour.
+5. spark is not exactly a true streaming as it runs a loop, micro batches whose latency is dependent on the trigger interval
+6. as events are not arriving each window will still not get an event and remain open and the process will keep running, i imagine the last seen could be 12:00am and we made windows of 5 min delay and its currently in the window of 12:30-1240, 11:55pm doesn't land in the window and remain open until a last seen causes the watermark to fall outside the window and closes it
