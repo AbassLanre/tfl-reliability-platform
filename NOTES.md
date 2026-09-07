@@ -361,3 +361,16 @@ it runs forever, basically a batch that runs forever in small chunks. latency is
 4. Tumbling is fixed or back to back and sliding is overlapping, we are using tumbling because it doesn't overlap but addup for when we work hourly, a 12 minutes window sum into one hour.
 5. spark is not exactly a true streaming as it runs a loop, micro batches whose latency is dependent on the trigger interval
 6. as events are not arriving each window will still not get an event and remain open and the process will keep running, i imagine the last seen could be 12:00am and we made windows of 5 min delay and its currently in the window of 12:30-1240, 11:55pm doesn't land in the window and remain open until a last seen causes the watermark to fall outside the window and closes it
+
+SPARK
+
+First we do a batch call to decide the watermark, we check the timestamps and subtract them. count of arrivals - 1547526 (total)
+
+If %TEMP% fills up over the week, delete the spark-* folders by hand.
+had issues with winutils and had to go to the github repo to download the twoo files, hadoop.dll and winutils.exe and placed them in C:\hadoop\bin
+Spark displays timestamps in session TZ; pinned to UTC to match producer
+ this sample contains no incident period, so the tail during a real disruption is unmeasured; and revisit once the bronze job has a week of data on disk
+
+ ran the watermark test to see what delay value we can use as our watermark, min was 0.59s and max was about 81 secs, p50 was 4.5s as opposed to the 43 secs we thought would be our median, and p99 is 64s
+
+ the watermark would best be used as 2 minut3es to cover even further disruptions that could bypass the 81secs max, its safer 
