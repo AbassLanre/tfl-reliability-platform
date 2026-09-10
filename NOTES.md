@@ -186,6 +186,8 @@ a worker dies, the team absorbs its workload automatically.
 
 rebalance — another consumer picks up its partitions from the last committed offset
 
+Every Kafka topic has a retention policy. The default, inherited from the broker's log.retention.hours=168, is 7 days, Once a chunk of the log (a segment file) is older than that, the broker deletes it and moves the earliest offset forward
+
 the tfl producer key messages by line_id so the messages are grouped according to the key and preserves per-line order within the same partition
 no data is lost when a consumer dies because of rebalancing, another consumer picks up the partition from the last commited offset
 
@@ -374,3 +376,33 @@ Spark displays timestamps in session TZ; pinned to UTC to match producer
  ran the watermark test to see what delay value we can use as our watermark, min was 0.59s and max was about 81 secs, p50 was 4.5s as opposed to the 43 secs we thought would be our median, and p99 is 64s
 
  the watermark would best be used as 2 minut3es to cover even further disruptions that could bypass the 81secs max, its safer 
+
+ tried to run bronze.arrivals stream but faced an issue with hadoop.dll as it failed to load
+ a warning I had classified as harmless turned fatal the first time a different code path ran; lesson is that a warning about a missing component is only harmless until something needs the component
+
+ fixed this by adding the hadoop/bin to the user file path
+
+ I started working on spark 12/13 days after the broker got the data, but i missed that kafka has a default retention period, 7 days, kafka is a buffer and not a store, the bronze layer is to get the data or rather copy the data out of the kafka to a durable storage location before the retention period ends
+
+ updated the retention.ms to 30 days
+
+ docker exec -it kafka /opt/kafka/bin/kafka-configs.sh --bootstrap-server localhost:9092 --alter --entity-type topics --entity-name tfl.arrivals --add-config retention.ms=2592000000
+
+ then check again with
+
+ docker exec -it kafka /opt/kafka/bin/kafka-configs.sh --bootstrap-server localhost:9092 --describe --entity-type topics --entity-name tfl.arrivals
+
+ 1. If I changed the trigger to 5 seconds and left the producer at 30 s, how often would you see a batch, and why?
+2. A row arrives at silver with event_ts 19:41:00. The newest event_ts Spark has seen so far is 19:44:00. Watermark is 2 minutes. Does the row land or get dropped?
+
+1. i would see a batch once since producer runs every 30s, so new offsets will come in after 30s when the sparks triggers it the 6th time
+2. it gets added, window -> 19:40-19:45, latest 19:44, watermark is 19:42, so the window is not yet closed, an event of 19:41 comes, it lands in the window. window is open, not row is newer
+
+ observations: Every one of the 20 rows in a batch has the same event_ts, and the skew to ingested_at is ~48 s in every batch: 19:40:01 → 19:40:49, 19:42:33 → 19:43:21, 19:43:36 → 19:44:24. Last week's median was 4.5 s.
+will revisit this in silver compute
+
+event_ts really is the prediction-generation time, which matters for your 48 s puzzle
+
+two queries means two consumers, two reads of every Kafka message, two checkpoints
+
+as of today 9/10/2026, So the topic now holds 1,604,979 messages, spark.read.parquet(bronze).count() must equal 1,604,977 and spark.read.text(quarantine).count() must equal 2
