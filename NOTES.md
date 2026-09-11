@@ -406,3 +406,10 @@ event_ts really is the prediction-generation time, which matters for your 48 s p
 two queries means two consumers, two reads of every Kafka message, two checkpoints
 
 as of today 9/10/2026, So the topic now holds 1,604,979 messages, spark.read.parquet(bronze).count() must equal 1,604,977 and spark.read.text(quarantine).count() must equal 2
+
+ingested_at is what we use to build the date/hour shelf labels from, it is easier to control. we'd use event_ts in silver as thats when we deal with watermarks
+bronze answers "when did we receive it", silver answers "when did it happen"
+
+highest file name in data\checkpoints\bronze_arrivals\commits is currently 35 
+then i restarted the bronze arrival and it picked up from where it stopped at 35 and continued to 36
+1,604,977 good rows in, 1,604,977 out

@@ -5,7 +5,8 @@ Bronze: land every tfl.arrivals message as-is into Parquet, continuously
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, from_json, count, min as min_, max as max_, avg, percentile
+    col, from_json, count, min as min_, max as max_, avg, percentile,
+    to_date, hour, to_timestamp, date_format, current_timestamp
 )
 from pyspark.sql.types import StructType, StructField, IntegerType, StringType, TimestampType
 
@@ -59,23 +60,33 @@ parsed = (
 )
 is_bad = col("j.event_type").isNull() | col("j.event_ts").isNull()
 
-good = parsed.filter(~is_bad).select("j.*")               # ~ is NOT; expand the struct only for good rows
+good =( parsed
+       .filter(~is_bad)
+       .select("j.*")
+       .withColumn("date", to_date(col("ingested_at")))
+       .withColumn("hour", hour(col("ingested_at")))
+       ) # ~ is NOT; expand the struct only for good rows
+good.printSchema()
+
 bad  = parsed.filter(is_bad).select("value_str")          # keep the raw text, that's what you'll debug from
 
 good_q = (
-          good.writeStream.queryName("bronze_good")
-          .format("console")
-          .outputMode("append")
-          .option("numRows", 3)
-          .trigger(processingTime="10 seconds")
-          .start()
-          )
+    good.writeStream.queryName("bronze_good")
+    .format("parquet")                                                   # WAS "console". Now: files on disk
+    .option("path", "data/bronze/arrivals")                              # the shelves. Relative to where you run the script, so run from repo root
+    .option("checkpointLocation", "data/checkpoints/bronze_arrivals")    # the clipboard: which Kafka offsets are finished. One per query, never shared
+    .partitionBy("date", "hour")                                         # one folder per value: date=2026-09-08/hour=19/
+    .outputMode("append")                                                # unchanged (also the only mode the file sink supports)
+    .trigger(processingTime="10 seconds")                                # unchanged
+    .start()
+)
 bad_q  = (
-          bad.writeStream.queryName("bronze_quarantine")
-          .format("console")
-          .outputMode("append")
-          .option("truncate", "false")
-          .trigger(processingTime="10 seconds")
-          .start()
+        bad.writeStream.queryName("bronze_quarantine")
+        .format("text")
+        .option("path", "data/quarantine/arrivals")                              # the shelves. Relative to where you run the script, so run from repo root
+        .option("checkpointLocation", "data/checkpoints/bronze_quarantine")    # the clipboard: which Kafka offsets are finished. One per query, never shared
+        .outputMode("append")                                                # unchanged (also the only mode the file sink supports)
+        .trigger(processingTime="10 seconds")                                # unchanged
+        .start()
           )
 spark.streams.awaitAnyTermination()                                 # block the main thread here until Ctrl+C or a failure
