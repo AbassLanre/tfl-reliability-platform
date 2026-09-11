@@ -413,3 +413,6 @@ bronze answers "when did we receive it", silver answers "when did it happen"
 highest file name in data\checkpoints\bronze_arrivals\commits is currently 35 
 then i restarted the bronze arrival and it picked up from where it stopped at 35 and continued to 36 and when it got to 80 i.e 0 to 80, it stopped adding ( 1,604,979/20,000)
 1,604,977 good rows in, 1,604,977 out
+
+spaek checkPointLocation and _spark_metadata are responsible for the batches to resume at 36 and not get duplicated
+checkpoints prevents gaps and spark meta data prevents duplicates
