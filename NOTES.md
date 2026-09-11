@@ -411,5 +411,5 @@ ingested_at is what we use to build the date/hour shelf labels from, it is easie
 bronze answers "when did we receive it", silver answers "when did it happen"
 
 highest file name in data\checkpoints\bronze_arrivals\commits is currently 35 
-then i restarted the bronze arrival and it picked up from where it stopped at 35 and continued to 36
+then i restarted the bronze arrival and it picked up from where it stopped at 35 and continued to 36 and when it got to 80 i.e 0 to 80, it stopped adding ( 1,604,979/20,000)
 1,604,977 good rows in, 1,604,977 out
