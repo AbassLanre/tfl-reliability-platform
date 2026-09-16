@@ -23,13 +23,30 @@ data-engineering-mentor skill first.
 - Keep NOTES.md entries for every bug/decision (Week 10 needs it). Percy
   keeps NOTES.md live DURING sessions, in his own words — this is working.
 
-## Project status (as of 2026-09-09)
+## Project status (as of 2026-09-16)
 
-- Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 (concepts) ✅, Day 2 Step 1
-  (skew measurement) ✅ committed 222aa0a. Day 2 Step 2 (bronze job):
-  sub-steps 1-3 ✅ (console sink, full 20-column schema, quarantine split),
-  sub-step 4 (Parquet sink) is NEXT. streaming/bronze_arrivals.py not yet
-  committed — commit by filename, not `git add .` (line-ending churn).
+- Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 (concepts) ✅, Day 2 ✅,
+  Day 3 DESIGN ✅ (both design questions answered from measurements on
+  bronze; decisions in NOTES.md; see "Day 3 design — DONE" below).
+  NEXT = Day 3 concepts (stateful streaming / state bounding), then the
+  first silver code as BATCH over bronze Parquet. Delay definition CHOSEN
+  (16 Sep): (a) last expected_arrival − first expected_arrival; in NOTES.md.
+- README.md is no longer a stub (16 Sep): mentor-drafted decision log
+  D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
+  and rewrites in his own voice; keep it updated at each week boundary.
+- docs/to_know.md created (16 Sep): per-session memory for interview prep,
+  Weeks 0–3 so far. Percy's convention: update it at the END of EVERY
+  session (see Mentor conventions).
+- Bronze on disk now holds 8 Sep AND 9 Sep data (producer + bronze job were
+  re-run after Day 2). The 1,604,977 figure is a Day 2 historical number,
+  not the current row count. Re-run check_bronze.py's count to get the
+  current total and record it.
+- Still commit by filename, not `git add .`, until line endings are fixed.
+- check_bronze.py has grown into a scratchpad of commented-out exploration
+  blocks (id counts, hypothesis tests, lowest_tts). Fine for now; when
+  silver starts, move the useful queries into a proper
+  streaming/explore_bronze.py or delete them, and restore check_bronze.py
+  to its two-count job.
 
 ## What was built in Week 2 (all working)
 
@@ -278,7 +295,63 @@ Findings from Day 1 worth carrying forward:
   list; withColumn = df["x"] = ...; agg = groupby with no group), then give
   the code with line-by-line comments. Keep doing that for readStream.
 
-### Day 2 Step 2 — IN PROGRESS (2026-09-08/09): sub-steps 1-3 done
+### Day 2 Step 2 — DONE (2026-09-11): bronze to Parquet, drill passed
+
+**What was built (2026-09-11), committed:**
+- `good` gets two partition columns: `withColumn("date", to_date("ingested_at"))`
+  and `withColumn("hour", hour("ingested_at"))`. Percy did this from a hint
+  in one swing (pandas mapping `.dt.date` / `.dt.hour` given first).
+  Schema verified: 22 fields, `date: date`, `hour: integer`.
+- **DECISION (Percy's): bronze partitions from ingested_at**, not event_ts.
+  Reason in his words: "easier to control; event_ts belongs in silver where
+  the watermark lives." Framing for README: bronze answers "when did WE
+  receive it", silver answers "when did it HAPPEN"; replaying Kafka lands in
+  the same bronze folders regardless of TfL timestamp lateness.
+- good sink: format parquet, path data/bronze/arrivals, checkpoint
+  data/checkpoints/bronze_arrivals, partitionBy(date, hour), append, 10 s.
+- bad sink: format text, path data/quarantine/arrivals, checkpoint
+  data/checkpoints/bronze_quarantine, no partitionBy (text sink needs exactly
+  one string column — `bad` is `.select("value_str")`, fine).
+- `.gitignore` now has `data/` (checked before first run: it only had
+  rabbitmq-data/ and activemq-data/).
+- File sinks print nothing per batch. Heartbeat moved to the filesystem:
+  `data/checkpoints/bronze_arrivals/commits/` gains one file per finished
+  batch (named 0, 1, 2, ...). Percy used this as the "batch counter".
+- **Kill/restart drill:** Ctrl+C when highest commit was **35**; restart
+  resumed at **36** (not 0); drained to **80** = 81 batches
+  (1,604,979 / 20,000 rounds up to 81 — prediction matched).
+- `streaming/check_bronze.py` (committed): batch reader, local[2] + UTC, no
+  Kafka package. Results: `spark.read.parquet("data/bronze/arrivals").count()`
+  == **1,604,977** ✅; `spark.read.text("data/quarantine/arrivals").count()`
+  == **2** ✅ and show() printed `this is not json` and `{"hello": "world"}`
+  — this also closed the deferred proof from sub-step 3.
+- No recurring "falling behind" WARN reported during the Parquet drain.
+
+**Concept nailed down (oral check, took the full two swings + answer):**
+Two ledgers, two jobs. Checkpoint = which Kafka offsets are done → prevents
+GAPS and sets the restart point. `_spark_metadata/` inside the Parquet path
+= catalogue of which part files each batch officially owns, written only
+after all the batch's files are on disk → prevents DUPLICATES.
+`spark.read.parquet` reads the catalogue, not the folder listing, so
+half-written orphan files from the killed batch 36 are invisible to Spark.
+Percy's first answer explained the 81-batch arithmetic (correct, wrong
+question); second answer was "checkpointLocation?" (half: the gaps half).
+Recorded in NOTES.md: "checkpoint prevents gaps, _spark_metadata prevents
+duplicates, and only Spark reads the second one."
+
+**CARRY-FORWARD for Week 7 (do not solve now):** only Spark honours
+`_spark_metadata`. pandas, DuckDB, Snowflake COPY INTO and Snowpipe list the
+folder and WOULD count orphan files as real rows. Bronze-to-S3-to-Snowpipe
+needs either (a) no orphans landing (check Spark 4.x file-sink cleanup
+options live when we get there) or (b) dedupe downstream anyway. This is
+also the honest motivation for Iceberg/Delta: a catalogue every engine
+reads. Interview-grade extension of the "kill at 35" story.
+
+Optional check never run: `(Get-ChildItem -Recurse data\bronze\arrivals
+-Filter *.parquet).Count` vs total paths listed in `_spark_metadata` entries;
+disk ≥ catalogue, difference = orphans.
+
+### Day 2 Step 2 history (2026-09-08/09): sub-steps 1-3
 
 **Kafka data loss and retention decision (2026-09-08).** The 26 Aug backlog
 (1,547,526 msgs) was GONE: kafka-get-offsets earliest == latest on all 11
@@ -366,10 +439,187 @@ bronze Parquet count == 1,604,977; quarantine text count == 2.
   which" — the five-numbers table (30 s poll, 10 s trigger, 15.5 s batch
   duration, 48 s skew, 2 min watermark) landed well; reuse it.
 
-### NEXT: sub-step 4 (Parquet sink), then sub-step 5 (kill/restart)
+### Day 3 design — DONE (2026-09-15/16): both questions answered by measurement
 
-Start here tomorrow. Pre-flight: docker ps (kafka up), venv active, fresh
-terminal (PATH has C:\hadoop\bin), producer NOT needed (1.6 M backlog).
+All exploration was BATCH over bronze Parquet (`spark.read.parquet`) in
+check_bronze.py, following the measure_skew → bronze pattern. Every step
+had a prediction first. Percy iterated several of these himself.
+
+**Q1 — what is "one arrival" / dedupe key. Findings, in order:**
+- `groupBy("id").count()`: 16,822 distinct TfL ids; rows per id min 1 /
+  p50 90 / p99 285 / max 1,760. So `id` IS stable across polls (Percy's
+  prediction, correct) — a prediction lives ~45 min at 30 s polls.
+- The 1,760-row id: 1 naptan (Uxbridge), 1 vehicle_id = **"000"**, 234
+  distinct event_ts. Rows per poll ≈ 7–9. Inspection showed 3 different
+  trains (time_to_station ~332/812/932 s) × 3 platforms (1, 2, 4), all
+  with vehicle "000" = TfL's placeholder for "train not identified" (common
+  at termini). TfL's `id` collapses all unidentified trains at a station
+  into one id. `direction` was NULL on these rows.
+- vehicle_id == "000" is **1.06 %** of bronze rows.
+- Hypothesis test on non-000 rows, groupBy(line_id, vehicle_id, naptan_id,
+  event_ts).count(): max 18, avg 1.50. Adding platform_name → max 6;
+  adding current_location → max 4, avg 1.39. Remaining duplicates were
+  IDENTICAL predictions fetched in two consecutive polls (same event_ts,
+  same time_to_station, same expected_arrival; only ingested_at differs,
+  ~58 s apart). I.e. TfL does not regenerate every 30 s; the producer
+  re-fetches unchanged generations. This is the SAME mechanism as the
+  8 Sep "identical event_ts across batches / steady 48 s skew" mystery —
+  now understood, no longer "unexplained".
+- Three named sources of row multiplication: (1) platform hedging (one
+  train predicted on several platforms), (2) vehicle "000" collapse,
+  (3) re-fetched unchanged generations.
+
+**Q1 decisions (Percy's, in NOTES.md):**
+- Three levels: bronze ROW (one photo of one board entry) → PREDICTION
+  (one TfL generation for one train at one station; identity
+  `(line_id, vehicle_id, naptan_id, event_ts)` = the
+  dropDuplicatesWithinWatermark key) → ARRIVAL (one train approaching one
+  station across many predictions; identity `(line_id, vehicle_id,
+  naptan_id)`).
+- `ingested_at` is OUT of the dedupe key on purpose (it differs on every
+  row by construction; including it would make dedupe a no-op). Percy
+  connected this to Week 2 dedupe.py's fingerprint excluding volatile
+  fields.
+- vehicle_id "000" rows are EXCLUDED from the delay metric and COUNTED as
+  "unattributable" — that count is a data-quality metric for the dashboard.
+- platform_name: mentor's lean = OUT of the key, keep one row arbitrarily
+  (1 s difference is noise at 5-min grain). Agreed; recorded in README D13.
+  (Percy asked what was expected of him here: nothing beyond writing the
+  decision down — it is NOT in the key.)
+
+**Q2 — what is an "actual" arrival. Findings:**
+- Percy's first idea: arrived when time_to_station reaches 0. Tested:
+  per arrival (non-000, groupBy arrival key, min(time_to_station)), then
+  summary across 16,928 arrivals: min 1 / p50 **18 s** / avg 117 s /
+  p99 **1,580 s** / max 1,829 s. So the countdown almost never reaches 0
+  (30 s poll misses the last seconds) and ~1 % of arrivals vanish while
+  still 25+ min out (cancelled/reversed/lost, OR truncated because the
+  producer was stopped — the Day 1 "last window never finalises" problem
+  in another form).
+- Share of arrivals with lowest time_to_station <= 60 s: **86.6 %**
+  (mentor predicted 85–92 %).
+
+**Q2 decisions:**
+- An arrival is COMPLETED when its lowest observed time_to_station <= 60 s
+  (two polls). Reason recorded by Percy: p50 = 18 s. Above 60 s = not
+  completed: cancelled / lost / truncated; counted, not measured.
+- Delay definition — **STILL OPEN, ask first thing next session.** Two
+  candidates were presented:
+  (a) prediction drift = last expected_arrival − first expected_arrival
+      (uses only TfL clocks → event-time only → reproducible on Kafka
+      replay; mentor's lean, argued from Percy's own Day 1 sentence);
+  (b) (last ingested_at + last time_to_station) − first expected_arrival
+      (mixes in processing time → not reproducible on replay).
+  DECIDED 16 Sep: (a), written in NOTES.md and README D14. Caveat in
+  README: the first prediction (~45 min out) is itself an
+  estimate, so "delay" = how much TfL's own forecast slipped, NOT lateness
+  against a timetable (there is no timetable in this feed).
+- Session-end truncation must be documented as a known limitation; it
+  also feeds the Week 9 open design question about the last window.
+
+**Spark/pandas mappings that landed this day (reuse them):**
+- `groupBy("id").count()` ≈ `groupby("id").size().reset_index(name="count")`;
+  Spark names the column `count` for you, and `min_("count")` then refers
+  to that column (Percy asked why "count" worked without creating it).
+- Two-step summary pattern: step 1 groupBy(key).agg(min(x).alias("m")) →
+  one row per entity; step 2 `.agg(...)` on "m" → summary ACROSS entities
+  (≈ `groupby(key)[x].min().describe()`). Percy collapsed both into one
+  agg once; the two-step shape needed to be shown as code.
+- `count("*")` (function) vs `"count"` (column name) in one agg is legal
+  but confusing; rename with withColumnRenamed if it recurs.
+- Spark recomputes a DataFrame each time an action runs on it (he called
+  `.count().show()` and then reused the grouped object). Harmless at 1.6 M
+  rows; mention caching only when it matters.
+
+### NEXT: Day 3 concepts, then first silver code (batch over bronze)
+
+Start here next session. Pre-flight: docker ps (kafka up — optional for
+batch work), venv active, fresh terminal (PATH has C:\hadoop\bin). First
+question to Percy: confirm he has reviewed README.md and docs/to_know.md
+and corrected anything not in his words.
+
+Then Day 3 concepts (postcards analogy again, tie to his own data):
+- Stateful streaming: why dedupe and windows need STATE, why state must
+  be bounded, and how the watermark is the thing that bounds it (this is
+  the "WHY before mechanism" lesson from the Day 1 oral exam).
+- `withWatermark("event_ts", "2 minutes")` + `dropDuplicatesWithinWatermark`
+  on the chosen key (documented in 4.2.0; verified 2026-09-04).
+- 5-minute tumbling windows per (line_id, station) using `window()`;
+  Append output mode → a window is emitted once when finalised.
+- Silver reads bronze Parquet (not Kafka): `spark.readStream.parquet(...)`
+  on a partitioned path needs the schema supplied or
+  `spark.sql.streaming.schemaInference` — verify live; batch-first
+  development sidesteps this until the switch.
+- Silver is where casts happen: expected_arrival string → timestamp; free
+  consistency test expected_arrival == event_ts + time_to_station.
+
+Then code, sub-steps with predictions like Day 2. pytest on static
+DataFrames for the transform functions (plan requires it). Proposed
+sub-steps for streaming/silver_arrivals.py, batch first (mentor's draft —
+adjust with Percy; one sub-step per message):
+
+1. **Batch read + casts.** spark.read.parquet(bronze) → filter event_type
+   == "arrival" and vehicle_id != "000" (count the excluded rows and print
+   them) → cast expected_arrival string → timestamp. Predicted: row count
+   = current bronze total minus the 000 rows (he has the 1.06 % figure).
+   Free consistency test: expected_arrival == event_ts + time_to_station
+   (to the second) for ~100 % of rows.
+2. **Dedupe to predictions (batch version).** dropDuplicates on
+   (line_id, vehicle_id, naptan_id, event_ts). Predicted: rows shrink by
+   roughly the 1.39 avg factor measured on Day 3 (i.e. to ~72 % of input).
+   Say out loud: in streaming this becomes withWatermark("event_ts",
+   "2 minutes") + dropDuplicatesWithinWatermark(same key), and the
+   watermark is what lets Spark forget old keys (bounded state).
+3. **Arrivals table.** groupBy(line_id, vehicle_id, naptan_id).agg(
+   min(expected_arrival) as first_expected, max(expected_arrival) as
+   last_expected, min(time_to_station) as lowest_tts, max(event_ts) as
+   last_seen_ts, count as n_predictions). completed = lowest_tts <= 60.
+   Predicted: ~16.9 k rows, ~86.6 % completed (Day 3 numbers).
+4. **Delay per completed arrival** per the chosen definition; sanity
+   summary (min/p50/p99/max of delay_s). Predicted: p50 near 0, some
+   negative (train arrived earlier than first predicted), tail in minutes.
+5. **5-minute tumbling windows** per (line_id, naptan_id) on last_seen_ts
+   (the arrival's event time): avg/p50/max delay, n_arrivals, n_not_completed.
+   Batch window() first; then switch read → readStream with
+   withWatermark + Append output mode and re-check the same numbers.
+6. **pytest on static DataFrames**: dedupe key, completed rule, delay
+   calc, consistency test. Feeds Week 8 CI.
+7. Day 5: checkpoint + kill/restart drill on the silver stream.
+
+Note for the streaming switch: groupBy(arrival key) over an unbounded
+stream is itself stateful; the arrival table in streaming form needs a
+watermark on event_ts too, and an arrival is only "final" once the
+watermark passes its last_seen_ts — that is exactly where the Week 9
+"last window never finalises" question lives. Teach it when we get there,
+not before.
+
+Teaching notes from Day 3 (2026-09-15/16):
+- He said explicitly: "I understand things slowly and it might be hard if
+  complex things are thrown/described all at once." When I packed the Q2
+  reframe + two delay definitions + a measurement into one message he came
+  back with "I am not sure I understand the next steps". Backing up to ONE
+  sentence of goal, ONE sentence of problem, ONE measurement fixed it.
+  Keep to one idea per message, and put the "what are we even doing"
+  sentence at the top.
+- Measurement-driven design works very well for him: prediction → run →
+  read the table together → decide. He iterated the hypothesis test three
+  times unprompted. Let him drive when he has momentum.
+- Numeric leading questions land ("1,760 rows but only ~460 polls: what
+  does that force?"). Use arithmetic as the hint.
+- When a mentor guess is wrong (I guessed line_id would vary; it didn't),
+  say so plainly — he notices and it builds trust in the prediction habit.
+
+Teaching notes carried from Day 2 (2026-09-11), still true:
+- Hint-level worked for withColumn/to_date/hour and for mirroring the
+  quarantine sink from the good sink. Full code with line comments was
+  right for the first Parquet writeStream (new surface).
+- Oral checks: he tends to answer a neighbouring question confidently and
+  well (81-batch arithmetic when asked about duplicates). Re-ask pointing
+  at the failure mode, then give the answer after two swings; that landed.
+- Pre-flight + folder-watching in a second terminal worked well; keep the
+  "prediction before every run" rhythm.
+
+Reference — Day 2 sub-step plan as originally written (all now done):
 
 4. **Parquet sink.** Before the first run: add `data/` to .gitignore.
    good → format("parquet"), option("path","data/bronze/arrivals"),
@@ -451,8 +701,21 @@ drill. pytest on static DataFrames throughout.
 ### Carry-over tasks (not blocking)
 
 - README: no-dedupe-on-arrivals defence; no-Avro/Schema-Registry defence;
-  skew measurement table + 2-minute watermark decision with caveats.
-- Git line-ending renormalisation (see Environment).
+  skew measurement table + 2-minute watermark decision with caveats;
+  bronze-partitioned-by-ingested_at decision; checkpoint vs
+  _spark_metadata explanation + kill-at-35 drill result.
+- Week 7: orphan Parquet files vs non-Spark readers (see Day 2 DONE).
+- TODO(you): confirm retention.ms=30d was applied to tfl.line-status and
+  tfl.disruptions, not just tfl.arrivals (still unconfirmed on 2026-09-11).
+- ~~UNEXPLAINED (from 2026-09-08): steady ~48 s skew on one central-line
+  partition.~~ EXPLAINED on Day 3: unchanged TfL generations re-fetched
+  across consecutive polls (same event_ts, later ingested_at). Still worth
+  a per-line skew number in silver, but it is no longer a mystery.
+- check_bronze.py: tidy the exploration blocks (see Project status).
+- README: written 16 Sep as a draft (D1–D14). Percy to review; fill TODOs
+  at each week boundary; add the "why local compute" cost numbers in Week 7.
+- Git line-ending renormalisation (see Environment) — not done on
+  2026-09-11 either; still commit by filename.
 - ~~Confirm PYSPARK_PYTHON warning is gone.~~ Confirmed gone 2026-09-08.
 - requirements.txt: fix UTF-16 encoding, curate, add pyspark==4.2.0
   (still not added).
@@ -470,3 +733,4 @@ drill. pytest on static DataFrames throughout.
   handoff doc is the exception — mentor writes it, Percy reviews/commits.
 - Update this handoff at each DAY boundary during Week 3, not just at the
   week boundary — the chat gets long once code and logs start.
+  After each session update a different note (to_know.md, create if not created, from the first day to now, try and remember): containing key things done to remember what each session is about for future reading and interview prep

@@ -416,3 +416,36 @@ then i restarted the bronze arrival and it picked up from where it stopped at 35
 
 spaek checkPointLocation and _spark_metadata are responsible for the batches to resume at 36 and not get duplicated
 checkpoints prevents gaps and spark meta data prevents duplicates
+
+seems tfl keeps same ID for each prediction
+event_ts tells you which photo a row came from, not which train. It's a version stamp, not an identity
+understanding the aggregate function:
+byId.count() ≈  good_df.groupby("id").size().reset_index(name="count")
+counts.agg(min, avg, ...) ≈  counts["count"].describe()
+
+train line_id of 000 means tfl don't know what train that is
+
+An arrival: one train approaching one station, across many predictions over ~45 minutes. Identity: (line_id, vehicle_id, naptan_id)
+
+chosen dedup keys: line_id, vehicle_id, naptan_id, event_ts
+one prediction = one TfL generation for one train at one station
+
+if the vehicle id is 000,000 rows are excluded from the delay metric and counted as unattributable, and that count is itself a data-quality number
+
+ingested_at will not be in the dedup because ofcourse each ingested at would be different and will return a unique role count of 1 for each grouping. 
+
++----------+---+------------------+----+------+----+
+|n_arrivals|min|avg               |p50 |p99   |max |
++----------+---+------------------+----+------+----+
+|16928     |1  |117.00425330812854|18.0|1580.0|1829|
++----------+---+------------------+----+------+----+
+Two honest explanations:
+
+1. The train was cancelled, reversed short, or the tracking system lost it. Real-world noise.
+2. Every train still on the board when you killed the producer has a "lowest countdown" of wherever it happened to be.
+
+Anything whose lowest countdown is above 60 s is not completed: cancelled, lost, or truncated by session end
+
+the threshold to get the delay would be 60s, any train whose arrival time is above 60s is not completed as the p50 gave a value of 18 for the last prediction of the trains arriving at a station. p99 = 1580 meant the train disnt get completed
+
+delay = last expected_arrival − first expected_arrival
