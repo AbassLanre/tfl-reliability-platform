@@ -69,15 +69,16 @@ lowest = (
     .groupBy("line_id", "vehicle_id", "naptan_id")
     .agg(min_("time_to_station").alias("lowest_tts"))
 )
+lowest.show(truncate=False)
 
-lowest.agg(
-    count("*").alias("n_arrivals"),
-    min_("lowest_tts").alias("min"),
-    avg("lowest_tts").alias("avg"),
-    percentile("lowest_tts", 0.5).alias("p50"),
-    percentile("lowest_tts", 0.99).alias("p99"),
-    max_("lowest_tts").alias("max"),
-).show(truncate=False)
+# lowest.agg(
+#     count("*").alias("n_arrivals"),
+#     min_("lowest_tts").alias("min"),
+#     avg("lowest_tts").alias("avg"),
+#     percentile("lowest_tts", 0.5).alias("p50"),
+#     percentile("lowest_tts", 0.99).alias("p99"),
+#     max_("lowest_tts").alias("max"),
+# ).show(truncate=False)
 
-percent_pred= lowest.filter(col("lowest_tts") <= 60).count()/lowest.count() * 100
-print(percent_pred)
+# percent_pred= lowest.filter(col("lowest_tts") <= 60).count()/lowest.count() * 100
+# print(percent_pred)

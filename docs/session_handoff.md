@@ -37,10 +37,13 @@ data-engineering-mentor skill first.
 - docs/to_know.md created (16 Sep): per-session memory for interview prep,
   Weeks 0–3 so far. Percy's convention: update it at the END of EVERY
   session (see Mentor conventions).
-- Bronze on disk now holds 8 Sep AND 9 Sep data (producer + bronze job were
-  re-run after Day 2). The 1,604,977 figure is a Day 2 historical number,
-  not the current row count. Re-run check_bronze.py's count to get the
-  current total and record it.
+- Bronze row count re-checked 2026-09-17: still exactly 1,604,977 (+ 2
+  quarantine). CORRECTION to the earlier note: nothing was re-run after
+  Day 2. The 1,604,979-message backlog was ALWAYS two producer sessions
+  (8 Sep ~19:40-20:xx UTC, short; 9 Sep ~16:00-19:xx UTC, the bulk), so
+  bronze has two date= folders but the same rows. Folder sizes:
+  date=2026-09-08 ~4 MB (hours 19-20), date=2026-09-09 ~37 MB (hours 16-19).
+  Mentor predicted one folder and was wrong; Percy's count was right.
 - Still commit by filename, not `git add .`, until line endings are fixed.
 - check_bronze.py has grown into a scratchpad of commented-out exploration
   blocks (id counts, hypothesis tests, lowest_tts). Fine for now; when

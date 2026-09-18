@@ -449,3 +449,63 @@ Anything whose lowest countdown is above 60 s is not completed: cancelled, lost,
 the threshold to get the delay would be 60s, any train whose arrival time is above 60s is not completed as the p50 gave a value of 18 for the last prediction of the trains arriving at a station. p99 = 1580 meant the train disnt get completed
 
 delay = last expected_arrival − first expected_arrival
+
+the watermark does two jobs with one number: it decides what is too late to accept, and therefore what is safe to forget.
+
+plain dropDuplicates only bounds state if the event-time column is in the key; dropDuplicatesWithinWatermark bounds it regardless. My key happens to include event_ts, so both work, and I chose the one whose safety doesn't depend on that accident
+
+state is the pile of things Spark must remember to finish a job (seen keys, open sums); the watermark is the one number that lets it empty the pile.
+
+bronze for line-status and disruptions still to do; simple copies, no watermark needed
+expected_arrival = event_ts + time_to_station
+
+dropDuplicates is the batch truth
+dropDuplicatesWithinWatermark is the streaming version that gets the same answer with bounded memory
+
+ran batch dropDuplicates and got 1056017 
+1,056,017. Ratio = 1,587,891 / 1,056,017 = 1.504
+
+
+dropDuplicates becomes dropDuplicatesWithinWatermark when we are streaming and we add the withWatermark line before it
+
+dedupe keeps an arbitrary platform row; completed share moves 86.6 → 86.4 %; accepted and documented, min/max are duplicate-proof anyway.
+
+when i tried to get the delay info from the grouped train arrivals (after dedupe), found out that the data was actually for two days meaning that a train from sep 8 to a particular train station coud have its earliest and latest time wrong. A train is not delayed if it actually completes a trip and returns to the same station, i.e bank train arrives at west silvertown at 7:00am (first expected) then from the tfl data we still see that the train still arrives at 12:00pm and we think there is a 3 hr delay, but its not, it actually completed the ride and started a new one,
+
+so to counter this, we use session_window("event_ts", "10 minutes") on the event_ts so we see a delay only after the 10 minutes window on the event_ts
+
+if we use 10 minutes for session window, n= 39222, p50= 155, completed arrivals with delay = 43
+
+if 5 minutes, n= 41450, p50= 147, completed arrivals with delay = 27
+if 15 minutes, n= 37119, p50= 171, completed arrivals with delay = 58
+
+now we need to consider if a train arrives earlier than tfl predicted and first expected now becomes the min bewtween expecred arrival and event_ts and vice cersa for last expected
+
+
+the result is as follows
+
++-----+-----------+------------------+-----------+-----------+-----------+
+|n    |min_delay_s|avg_delay_s       |p50_delay_s|p99_delay_s|max_delay_s|
++-----+-----------+------------------+-----------+-----------+-----------+
+|28854|-1371      |147.28602620087335|41.0       |1932.0     |9939       |
++-----+-----------+------------------+-----------+-----------+-----------+
+
+Number of completed arrivals with delay: 41
+
+completed had 73.6% of the grouped_kept without duplicates
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
