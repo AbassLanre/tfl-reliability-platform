@@ -494,12 +494,16 @@ Number of completed arrivals with delay: 41
 
 completed had 73.6% of the grouped_kept without duplicates
 
+session_window splits by silence in the data, session_window answers "which trip is this row part of"
+window splits by the clock, window answers "which reporting bucket does this finished trip belong to"
 
+after grouping into windows, nothing was lost 28854 in and out
 
+percentiles like p99 belong in the hourly or daily marts where n is in the hundreds.
 
+first and last windows of every collection session are edge-truncated; exclude or flag them in the marts
 
-
-
+a 0-second delay and "no data" are different facts, and the dashboard should show them differently
 
 
 

@@ -257,7 +257,60 @@ with a column Spark names `count`; two-step summary pattern (one row per
 entity, then agg across entities) ≈ pandas groupby().min().describe();
 Spark recomputes a DataFrame on every action unless cached.
 
-**Next:** Day 3 concepts (why dedupe/windows need state, why state must be
-bounded, watermark bounds it), then silver_arrivals.py as BATCH over bronze
-first, sub-steps with predictions, then switch to readStream. Then pytest
-on static DataFrames, then Day 5 checkpoint drill on the silver stream.
+**Next:** Day 3 concepts, then silver_arrivals.py in batch. (Done 17-18 Sep, below.)
+
+## Week 3 Day 3 concepts + Day 4 part 1 — silver in batch, two bugs (17–18 Sep 2026)
+
+**Concepts:** state = what Spark must remember to finish a job (seen keys
+for dedupe, open sums for windows). It must be bounded or RAM overflows.
+The watermark is the one number that decides both what is too late to
+accept and what is safe to forget. dropDuplicatesWithinWatermark bounds
+state whether or not event_ts is in the key; plain dropDuplicates only if it
+is. Append mode = a window is written once, when it finalises.
+
+**Built:** `streaming/silver_arrivals.py`, batch over bronze Parquet.
+Filter "000" (17,086 rows, 1.07 %) → cast expected_arrival → dedupe on
+(line_id, vehicle_id, naptan_id, event_ts) → 1,056,017 predictions (ratio
+1.504, matches Day 3) → arrivals → delay.
+
+**Broke / learned (the good stuff):**
+- expected_arrival == event_ts + time_to_station for 100 % of rows. It is a
+  derived field. Free dbt test.
+- dropDuplicates keeps an arbitrary row. Platform-hedging siblings carry
+  different countdowns, so completed share moved 86.6 → 86.4 %. Measured,
+  accepted, written down.
+- **The arrival key had no time bound.** First delay result: max 24.1 hours,
+  p50 1.8 hours, 9,633 "arrivals" delayed over an hour. Same train, same
+  station, two different trips (across the two collection days AND within
+  one afternoon, because a round trip is 1–2 h). Day 3's 16,928 was
+  distinct (line, train, station), not arrivals.
+  Fix: `session_window("event_ts", "10 minutes")` in the groupBy. New pile
+  after 10 min of silence per key. 39,222 arrivals; impossible delays
+  9,633 → 43. Gap sensitivity: 5 min 41,450 / 10 min 39,222 / 15 min 37,119.
+  Chose 10, recorded the table, revisit with more data.
+- **max(expected) − min(expected) is spread, not drift.** Never negative.
+  Fixed with `min_by`/`max_by` on event_ts. Now: completed-only delay
+  min −1,371 s, p50 41 s, p99 1,932 s. Completed share 73.6 % (fragments
+  from split trips).
+- Three mentor predictions were wrong today (one bronze folder; "a few
+  dozen" cross-day merges; gap sensitivity "within a few percent"). The
+  prediction habit is what caught all three.
+
+**Interview sentences:**
+- "My arrival key was right in space and unbounded in time. A 24-hour delay
+  is impossible, so I traced it, fixed it with a session window, and the
+  before/after is 9,633 impossible delays down to 43."
+- "Session windows split by gaps and define identity; tumbling windows
+  split by the clock and define reporting grain. Different rules, both are
+  bounded by the watermark in streaming."
+- "Dedupe is order-dependent. I measured what the arbitrary choice cost
+  and documented it instead of pretending it was free."
+- "The watermark does two jobs with one number: what is too late to accept,
+  and therefore what is safe to forget."
+
+**Spark learned:** session_window, min_by/max_by, `.cache()` when a
+DataFrame is reused (Spark is lazy; a DataFrame is a recipe until cached),
+`filter(col("flag"))` not `== True`.
+
+**Next:** 5-minute tumbling windows per line/station; refactor into
+functions; pytest; readStream switch with watermark + Append; Day 5 drill.

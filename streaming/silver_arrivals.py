@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, count_distinct, session_window, count, min as min_, min_by, max as max_, max_by, avg, percentile, to_timestamp
+    col, count_distinct, session_window, count, when, min as min_, min_by, max as max_, max_by,sum as sum_, avg, percentile, to_timestamp, window
 )
 
 spark = (
@@ -44,17 +44,28 @@ grouped_kept = (
 #     max_("delay_s").alias("max_delay_s"),  
 # ).show(truncate=False) 
 
-grouped_kept.filter(col("completed")).agg(
-   count("*").alias("n"),
-    min_("delay_s").alias("min_delay_s"),
-    avg("delay_s").alias("avg_delay_s"),
-    percentile("delay_s", 0.5).alias("p50_delay_s"),
-    percentile("delay_s", 0.99).alias("p99_delay_s"),
-    max_("delay_s").alias("max_delay_s"),  
+windowed_kept = (grouped_kept
+                 .groupBy(window("last_event_seen","5 minutes"),"line_id", "naptan_id")
+                 .agg(
+                     count("*").alias("n_total"),
+                     count(when(col("completed"),1)).alias("n_completed"),
+                     avg(when(col("completed"), col("delay_s"))).alias("avg_delay_s"),
+                     min_(when(col("completed"), col("delay_s"))).alias("min_delay_s"),
+                     max_(when(col("completed"), col("delay_s"))).alias("max_delay_s"),
+                     percentile(when(col("completed"), col("delay_s")), 0.5).alias("p50_delay_s"),
+                     percentile(when(col("completed"), col("delay_s")), 0.99).alias("p99_delay_s"),
+                     count(when(~col("completed"),1)).alias("n_incomplete"),
+                 )
+                 )
+windowed_kept.show(truncate=False)
+
+windowed_kept.agg(
+    sum_("n_incomplete").alias("total_incomplete_arrivals"),
+    count("*").alias("n_windows"),
 ).show(truncate=False)
 
 
 # completed_pct = grouped_kept.filter(col("completed")).count() / grouped_kept.count() * 100
 # print(f"Percentage of completed arrivals: {completed_pct:.2f}%")
-delay_cnt = grouped_kept.filter(col("completed")).filter(col("delay_s") > 3600).count()
-print(f"Number of completed arrivals with delay: {delay_cnt}")
+# delay_cnt = grouped_kept.filter(col("completed")).filter(col("delay_s") > 3600).count()
+# print(f"Number of completed arrivals with delay: {delay_cnt}")

@@ -25,12 +25,14 @@ data-engineering-mentor skill first.
 
 ## Project status (as of 2026-09-16)
 
-- Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 (concepts) ✅, Day 2 ✅,
-  Day 3 DESIGN ✅ (both design questions answered from measurements on
-  bronze; decisions in NOTES.md; see "Day 3 design — DONE" below).
-  NEXT = Day 3 concepts (stateful streaming / state bounding), then the
-  first silver code as BATCH over bronze Parquet. Delay definition CHOSEN
-  (16 Sep): (a) last expected_arrival − first expected_arrival; in NOTES.md.
+- Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 ✅, Day 2 ✅, Day 3 design ✅,
+  Day 3 concepts ✅ (17 Sep: state / bounded state / watermark bounds it),
+  Day 4 part 1 ✅ (17-18 Sep: silver_arrivals.py as BATCH over bronze,
+  sub-steps 1-5 done, two design bugs found and fixed — see "Day 4 part 1
+  DONE" below). Committed feb26b5.
+  NEXT = Day 4 part 2: 5-minute tumbling windows per (line_id, naptan_id),
+  then switch read -> readStream (withWatermark + dropDuplicatesWithinWatermark
+  + Append), then pytest on the transforms, then Day 5 kill/restart drill.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
   and rewrites in his own voice; keep it updated at each week boundary.
@@ -534,7 +536,169 @@ had a prediction first. Percy iterated several of these himself.
   `.count().show()` and then reused the grouped object). Harmless at 1.6 M
   rows; mention caching only when it matters.
 
-### NEXT: Day 3 concepts, then first silver code (batch over bronze)
+### Day 4 part 1 — DONE (2026-09-17/18): silver arrivals in BATCH, two design bugs fixed
+
+File: `streaming/silver_arrivals.py` (batch, local[2], UTC, no Kafka
+package; reads `data/bronze/arrivals`). Commit feb26b5. Every sub-step had
+a prediction first; three mentor predictions were WRONG and are recorded.
+
+**Concepts (Day 3 concepts, done first, oral answers OK after two swings):**
+state = what Spark must remember to finish a job (seen keys, open sums);
+state must be bounded or RAM overflows; the watermark is the ONE number that
+both decides what is too late to accept AND what is safe to forget.
+`dropDuplicatesWithinWatermark` chosen over plain `dropDuplicates` because
+it bounds state regardless of whether event_ts is in the key (our key
+happens to include it, so both would work; we chose the one whose safety
+does not depend on that accident). Append mode = window written once when
+finalised; the Week 9 "last window never finalises" question still parked.
+
+**Sub-step results (all on bronze count 1,604,977):**
+1. unattributable (vehicle_id == "000") = 17,086 (1.065 %); kept = 1,587,891;
+   sum exact.
+2. `to_timestamp(expected_arrival)`; consistency test
+   `expected_arrival == event_ts + time_to_station` (cast long) held for
+   1,587,891 / 1,587,891 = 100 %. So expected_arrival is DERIVED by TfL;
+   only two of the three time fields carry information. Free dbt test for
+   Week 5 (expect 100 %).
+3. `dropDuplicates([line_id, vehicle_id, naptan_id, event_ts])` ->
+   1,056,017 predictions. Ratio 1.504, matches Day 3's measured 1.50 for
+   this key to three decimals.
+4. First arrivals table with groupBy(line_id, vehicle_id, naptan_id):
+   16,928 rows (= Day 3), n_predictions p50 61 / max 180. Completed share
+   86.37 % vs Day 3's 86.60 % — explained and VERIFIED (86.60 % re-measured
+   before dedupe): dropDuplicates keeps an ARBITRARY platform-hedging row,
+   siblings carry different time_to_station, ~40 arrivals lost their <=60 s
+   row. Accepted and documented; min/max are duplicate-proof anyway, only
+   n_predictions and state size need the dedupe.
+5. Delay: FIRST RESULT WAS NONSENSE — max_delay_s = 86,736 s (24.1 h),
+   p50 6,624 s, 9,633 of ~14.6k completed arrivals "delayed" > 1 h, 3,975
+   > 80,000 s. Mentor predicted "a few dozen" cross-day cases; wrong by two
+   orders of magnitude. ROOT CAUSE: the arrival key (line, vehicle, naptan)
+   has NO TIME BOUND. Bronze spans two sessions ~24 h apart, and within one
+   3-4 h session a tube train visits the same station 2-3 times (round trip
+   1-2 h). Day 3's 16,928 was never "arrivals"; it was distinct
+   (line, train, station) combinations.
+
+**Bug fix 1 — session_window (Percy's one-line change, worked first run):**
+`groupBy(session_window("event_ts", "10 minutes"), line_id, vehicle_id,
+naptan_id)`. A new session starts after >10 min with no prediction for that
+key. Input rows unchanged (1,056,017); output = one row per TRIP.
+Result: 39,222 arrivals (mentor predicted 35-50k). max_delay 86,736 -> 9,940 s;
+p50 6,624 -> 155 s; "> 1 h" count 9,633 -> 43.
+Gap sensitivity (mentor predicted "within a few percent" — WRONG, ~5.5 %
+per step): 5 min = 41,450 / 10 min = 39,222 / 15 min = 37,119. Means real
+5-15 min gaps exist inside trips (TfL loses a train briefly) and/or repeat
+visits closer than 15 min (Waterloo & City ~10 min shuttle). DECISION:
+10 minutes, recorded as a judgement WITH the sensitivity table; revisit
+after a week of data by measuring the per-key gap distribution directly
+(needs a lag window function — not taught yet).
+Percy hit a wall on session_window ("does it multiply rows?"); what
+unblocked him: one concrete train timeline (16:05-16:48, 70 min silence,
+17:58-18:41) and the sentence "input rows unchanged, more PILES because
+there really are more trips".
+
+**Bug fix 2 — delay definition:** `max(expected) - min(expected)` is the
+SPREAD of forecasts and can never be negative (min_delay_s was 0). Day 3's
+definition meant first/last IN TIME by event_ts. Fixed with
+`min_by("expected_arrival_ts","event_ts")` / `max_by(...)` (verified in
+pyspark.sql.functions on 4.2.0 by running it).
+Completed-only (10-min gap) delay: n 28,854 | min -1,371 s | avg 147 s |
+p50 41 s | p99 1,932 s | max 9,939 s; 41 completed arrivals > 3,600 s
+(terminus dwell / long-gap edge cases, footnote not flaw).
+**Completed share is now 73.6 %** (28,854 / 39,222), down from 86.4 %:
+splitting merged trips creates fragments whose lowest tts never reaches
+60 s. Honest, documented, another reason to measure the gap distribution.
+
+**Interview sentences produced today (Percy to rewrite in his words):**
+- "My arrival key was correct in space but had no bound in time; I found it
+  because a 24-hour 'delay' is impossible, fixed it with a session window,
+  and the before/after is 9,633 -> 43 impossible delays."
+- "dropDuplicates keeps an arbitrary row; I measured what that cost
+  (86.6 -> 86.4 %) and documented it rather than pretending it was free."
+- "expected_arrival is derived (100 % consistent with event_ts +
+  time_to_station), so it is a free data-quality test, not a fact."
+- "The watermark does two jobs with one number: too late to accept, and
+  therefore safe to forget."
+
+**Code state (`silver_arrivals.py`, flat script, not yet functions):**
+imports include session_window, min_by, max_by; `.cache()` on grouped_kept
+(used 3+ times — first place caching earned its keep, taught as "Spark is
+lazy, a DataFrame is a recipe until cached"); consistency check kept as a
+comment for the pytest step. Known cosmetics: print label says "with delay"
+(should say "> 3600 s"); delay summary must filter completed first.
+
+**Teaching notes for next mentor (17-18 Sep):**
+- Percy answers a NEIGHBOURING question confidently (60 s completion rule
+  when asked about state eviction). Re-ask pointing at the failure mode.
+- He skipped a "say the streaming sentence out loud" request twice. Ask
+  once, then just state it and move on; don't nag.
+- One-line code changes with "run it and check ONE number" worked well
+  when he was overwhelmed. "What are we even doing?" sentence at the top.
+- Three mentor predictions were wrong today (one-folder, few-dozen cross-day,
+  gap sensitivity). Saying so plainly kept trust; keep doing it.
+- He asked "check the code" three times; he wants review, not just numbers.
+  Read the file each time (device_bash on the mounted folder works).
+
+### NEXT (start here): Day 4 part 2 — windows, then the streaming switch
+
+Pre-flight: fresh terminal (PATH has C:\hadoop\bin), venv active, Kafka NOT
+needed until the streaming switch. Ask Percy to confirm NOTES.md has the
+nine lines from 17-18 Sep in his words and that he has re-read to_know.md.
+
+Sub-steps, one per message, prediction before each run:
+
+6. **5-minute tumbling windows per (line_id, naptan_id)** on
+   `last_event_seen` (the arrival's event time), completed arrivals only:
+   `groupBy(window("last_event_seen", "5 minutes"), "line_id", "naptan_id")
+   .agg(avg/percentile(0.5)/max of delay_s, count as n_arrivals)` plus a
+   second count of NOT completed per window (n_not_completed). Pandas
+   mapping: `pd.Grouper(freq="5min")`. Predicted: rows ≈ number of
+   (line, station, 5-min bucket) combinations with traffic — tens of
+   thousands; every window's n_arrivals small (0-5); avg delay_s per window
+   mostly < 60 s. Sanity: sum(n_arrivals) over windows == 28,854.
+   Teach tumbling vs session here: session_window splits by GAPS (trip
+   identity), window() splits by the CLOCK (reporting grain). Both are
+   "piles", different rules.
+7. **Refactor into functions** BEFORE the streaming switch (so pytest and
+   the stream share code): `split_unattributable(df)`, `add_expected_ts(df)`,
+   `dedupe_predictions(df)`, `build_arrivals(df, gap="10 minutes")`,
+   `add_delay(df)`, `window_reliability(df)`. Pure DataFrame-in,
+   DataFrame-out. Percy has the pattern from Week 2's transform.py.
+8. **pytest on static DataFrames** (`tests/test_silver_arrivals.py`):
+   tiny hand-made rows via `spark.createDataFrame`; cases = "000" split,
+   consistency, dedupe key collapses platform siblings, two trips 70 min
+   apart become two arrivals, delay negative when forecast improves,
+   completed rule at 60/61. Feeds Week 8 CI. Note: needs a session-scoped
+   SparkSession fixture (conftest.py); local[1] is fine.
+9. **Streaming switch**: `spark.readStream.parquet("data/bronze/arrivals")`
+   needs the schema supplied (verify live: `.schema(bronze_schema)` or
+   `spark.sql.streaming.schemaInference=true`; mentor lean = supply schema
+   from a `spark.read.parquet(...).schema` one-liner). Then
+   `.withWatermark("event_ts", "2 minutes")` BEFORE
+   `.dropDuplicatesWithinWatermark(key)`; session_window aggregation in
+   streaming REQUIRES a watermark on the same event-time column (Spark
+   docs) — teach why: the session can't close until the watermark passes
+   its end + gap. Output mode Append; sink Parquet at
+   `data/silver/arrivals` with its own checkpoint. Predicted: streaming
+   totals match batch numbers EXCEPT the last session per key per
+   collection window, which never finalises (the Week 9 question, now
+   live). Count the difference and record it.
+10. **Day 5 kill/restart drill** on the silver stream, same shape as bronze.
+
+Design note for step 9 (do not solve early): stacked stateful ops
+(dropDuplicatesWithinWatermark -> session_window agg -> tumbling window
+agg) in ONE streaming query need Spark's "multiple stateful operators"
+support (added 3.4; check 4.2.0 docs for restrictions, esp. session
+windows after another stateful op). Fallback = two queries: silver
+arrivals stream to Parquet, then windows as a second job (batch or stream)
+over silver. That is a perfectly defensible architecture and probably the
+one to ship.
+
+Carry-over from today: bronze for tfl.line-status and tfl.disruptions still
+to build (simple copies of the arrivals bronze job, no watermark). TODO(you):
+retention.ms on those two topics still unconfirmed.
+
+### Reference — original Day 3/4 sub-step plan as written 16 Sep (steps 1-5 done 17-18 Sep)
 
 Start here next session. Pre-flight: docker ps (kafka up — optional for
 batch work), venv active, fresh terminal (PATH has C:\hadoop\bin). First
