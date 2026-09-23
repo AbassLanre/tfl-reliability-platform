@@ -23,15 +23,19 @@ data-engineering-mentor skill first.
 - Keep NOTES.md entries for every bug/decision (Week 10 needs it). Percy
   keeps NOTES.md live DURING sessions, in his own words — this is working.
 
-## Project status (as of 2026-09-16)
+## Project status (as of 2026-09-22)
 
 - Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 ✅, Day 2 ✅, Day 3 design ✅,
   Day 3 concepts ✅ (17 Sep: state / bounded state / watermark bounds it),
   Day 4 part 1 ✅ (17-18 Sep: silver_arrivals.py as BATCH over bronze,
   sub-steps 1-5 done, two design bugs found and fixed — see "Day 4 part 1
   DONE" below). Committed feb26b5.
-  NEXT = Day 4 part 2: 5-minute tumbling windows per (line_id, naptan_id),
-  then switch read -> readStream (withWatermark + dropDuplicatesWithinWatermark
+  Day 4 part 2 ✅ (21-22 Sep: 5-min tumbling windows, refactor into six
+  pure functions with __main__ guard, pytest x5 green). Commits b5b5672,
+  bce0447, fbacbcc.
+  NEXT = Step 9: streaming switch (read -> readStream on bronze Parquet,
+  withWatermark + dropDuplicatesWithinWatermark + Append, Parquet sink at
+  data/silver/arrivals), then Day 5 kill/restart drill.
   + Append), then pytest on the transforms, then Day 5 kill/restart drill.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
@@ -639,64 +643,164 @@ comment for the pytest step. Known cosmetics: print label says "with delay"
 - He asked "check the code" three times; he wants review, not just numbers.
   Read the file each time (device_bash on the mounted folder works).
 
-### NEXT (start here): Day 4 part 2 — windows, then the streaming switch
+### Day 4 part 2 — DONE (2026-09-21/22): windows, functions, pytest
 
-Pre-flight: fresh terminal (PATH has C:\hadoop\bin), venv active, Kafka NOT
-needed until the streaming switch. Ask Percy to confirm NOTES.md has the
-nine lines from 17-18 Sep in his words and that he has re-read to_know.md.
+**Step 6, tumbling windows (window_reliability):**
+`groupBy(window("last_event_seen", "5 minutes"), line_id, naptan_id)` over
+ALL arrivals (not just completed), with conditional aggregates:
+`count(when(col("completed"), 1))` = n_completed,
+`avg(when(col("completed"), col("delay_s")))` etc. for the delay stats,
+`count(when(~col("completed"), 1))` = n_incomplete. Percy's column names:
+n_total / n_completed / n_incomplete / avg,min,max,p50,p99_delay_s.
+Results on bronze 1,604,977: completed-only first pass = 12,330 windows,
+sum(n_arrivals) == 28,854 exactly. With not-completed included = **13,602
+windows**, sum n_completed 28,854 / n_incomplete 10,368 / n_total 39,222.
+Mentor predictions: rows 15-25k WRONG (12,330 — ~2.3 completed arrivals
+per line/station/5-min bucket, denser than guessed); 13,000-14,500 for the
+second pass RIGHT. Windows with 0 completed show NULL delay stats: correct,
+do NOT coalesce to 0 (0 s delay and "no data" are different facts).
+Observed: first window of a session (19:40-19:45 on 8 Sep) has many
+negative delays because trains were mid-approach when collection started.
+NOTES.md line written: first and last windows of every collection session
+are edge-truncated; exclude or flag them in the marts (Week 5).
+Concept taught and landed (Percy's words in NOTES.md): session_window
+splits by SILENCE in the data and answers "which trip"; window splits by
+the CLOCK and answers "which reporting bucket". Both are piles, different
+rules.
 
-Sub-steps, one per message, prediction before each run:
+**Step 7, refactor:** silver_arrivals.py now = six pure functions
+(DataFrame in, DataFrame out, no reads/shows/prints inside):
+`split_unattributable(df) -> (kept, unattributable)`, `add_expected_ts`,
+`dedupe_predictions`, `build_arrivals(df, gap="10 minutes")`, `add_delay`,
+`window_reliability(df, window_duration="5 minutes")`. SparkSession, the
+bronze read, `.cache()` on grouped_kept and the two shows live under
+`if __name__ == "__main__":`. Percy did all six in one swing; review fixed:
+missing __main__ guard (would make `import` read bronze), useless
+`.cache()` on a DataFrame used once, dead commented code, unused import.
+Numbers identical before/after (28,854 / 10,368 / 39,222 / 13,602).
 
-6. **5-minute tumbling windows per (line_id, naptan_id)** on
-   `last_event_seen` (the arrival's event time), completed arrivals only:
-   `groupBy(window("last_event_seen", "5 minutes"), "line_id", "naptan_id")
-   .agg(avg/percentile(0.5)/max of delay_s, count as n_arrivals)` plus a
-   second count of NOT completed per window (n_not_completed). Pandas
-   mapping: `pd.Grouper(freq="5min")`. Predicted: rows ≈ number of
-   (line, station, 5-min bucket) combinations with traffic — tens of
-   thousands; every window's n_arrivals small (0-5); avg delay_s per window
-   mostly < 60 s. Sanity: sum(n_arrivals) over windows == 28,854.
-   Teach tumbling vs session here: session_window splits by GAPS (trip
-   identity), window() splits by the CLOCK (reporting grain). Both are
-   "piles", different rules.
-7. **Refactor into functions** BEFORE the streaming switch (so pytest and
-   the stream share code): `split_unattributable(df)`, `add_expected_ts(df)`,
-   `dedupe_predictions(df)`, `build_arrivals(df, gap="10 minutes")`,
-   `add_delay(df)`, `window_reliability(df)`. Pure DataFrame-in,
-   DataFrame-out. Percy has the pattern from Week 2's transform.py.
-8. **pytest on static DataFrames** (`tests/test_silver_arrivals.py`):
-   tiny hand-made rows via `spark.createDataFrame`; cases = "000" split,
-   consistency, dedupe key collapses platform siblings, two trips 70 min
-   apart become two arrivals, delay negative when forecast improves,
-   completed rule at 60/61. Feeds Week 8 CI. Note: needs a session-scoped
-   SparkSession fixture (conftest.py); local[1] is fine.
-9. **Streaming switch**: `spark.readStream.parquet("data/bronze/arrivals")`
-   needs the schema supplied (verify live: `.schema(bronze_schema)` or
-   `spark.sql.streaming.schemaInference=true`; mentor lean = supply schema
-   from a `spark.read.parquet(...).schema` one-liner). Then
-   `.withWatermark("event_ts", "2 minutes")` BEFORE
-   `.dropDuplicatesWithinWatermark(key)`; session_window aggregation in
-   streaming REQUIRES a watermark on the same event-time column (Spark
-   docs) — teach why: the session can't close until the watermark passes
-   its end + gap. Output mode Append; sink Parquet at
-   `data/silver/arrivals` with its own checkpoint. Predicted: streaming
-   totals match batch numbers EXCEPT the last session per key per
-   collection window, which never finalises (the Week 9 question, now
-   live). Count the difference and record it.
-10. **Day 5 kill/restart drill** on the silver stream, same shape as bronze.
+**Step 8, pytest:** `streaming/__init__.py` (empty, makes it a package);
+`tests/conftest.py` with a session-scoped `spark` fixture (local[1], UTC,
+`spark.sql.shuffle.partitions=1` — default 200 makes 5-row groupBys slow);
+`tests/test_silver_arrivals.py` with 5 tests, all green (`5 passed`, ~20 s,
+all Spark startup). Run with `python -m pytest tests -q` from repo root
+(`python -m` puts cwd on sys.path so `from streaming.silver_arrivals
+import ...` resolves). Tests: (1) "000" split incl. smoke_test row dropped
+from kept but NOT counted unattributable; (2) dedupe collapses platform
+siblings, new event_ts survives, asserted on sorted collected timestamps;
+(3) two trips 70 min apart -> 2 arrivals (guards session_window);
+(4) delay = -120 when forecast improves 16:30 -> 16:28 (guards
+min_by/max_by; plain min/max would give +120); (5) completed boundary
+lowest_tts 60 -> True, 61 -> False. Percy's oral answer on "16:14 instead
+of 17:58" was correct and clearly worded (within 10 min of 16:08 = same
+pile). PySpark round-trips datetime via the machine's local zone (BST);
+symmetric, so datetime-to-datetime comparisons are safe, string
+comparisons are not. pytest is installed in .venv but NOT yet in
+requirements.txt.
 
-Design note for step 9 (do not solve early): stacked stateful ops
-(dropDuplicatesWithinWatermark -> session_window agg -> tumbling window
-agg) in ONE streaming query need Spark's "multiple stateful operators"
-support (added 3.4; check 4.2.0 docs for restrictions, esp. session
-windows after another stateful op). Fallback = two queries: silver
-arrivals stream to Parquet, then windows as a second job (batch or stream)
-over silver. That is a perfectly defensible architecture and probably the
-one to ship.
+Cosmetic carry-over (not blocking): rename `test_build_arrivals` ->
+`..._splits_trips_70_min_apart` and `test_completed_rule` ->
+`..._at_60_and_61`; typo `sigblings`; strip ~30 trailing blank lines in the
+test file; a mentor `git status` left a stale `.git/index.lock` once
+(Percy removed it) — mentor should avoid running git in the mounted repo.
 
-Carry-over from today: bronze for tfl.line-status and tfl.disruptions still
-to build (simple copies of the arrivals bronze job, no watermark). TODO(you):
-retention.ms on those two topics still unconfirmed.
+**Teaching notes for next mentor (21-22 Sep) — READ THESE:**
+- Percy pushed back twice this session, both times rightly: (a) "you talk
+  in shorthand, short messages jumbled together" after I packed three ideas
+  + six function names into one message; (b) "your hints can be vague or
+  complex". What fixed it: ONE idea per message, a "what are we even
+  doing" sentence at the top, then ONE tiny action with a predicted number.
+  For hints: give the CONCRETE rows/values as a small table and the exact
+  expected result, let him write the code. Do not describe the shape of a
+  solution in prose and call it a hint.
+- He misread "refactor into functions" as "create a streaming file". Say
+  explicitly what a step is NOT when the name could mislead.
+- When he has a pattern (he had transform.py from Week 2) he will do all
+  six functions in one go unprompted. Let him, then review.
+- He asks "check the code" after each step and means it. Read the file.
+  Review format that worked: numbered, most important first, each item =
+  what + why + the fix, then one paragraph of what is right.
+- Predicted outputs before every run still works; he checks them and
+  notices when mine are wrong. Two mentor misses this session (12,330 rows;
+  earlier 15-25k guess). Say so plainly.
+
+### NEXT (start here): Step 9 — the streaming switch
+
+Pre-flight: fresh terminal (PATH has C:\hadoop\bin), venv active,
+`python -m pytest tests -q` -> `5 passed` (proves the functions still
+import). Kafka is NOT needed: silver reads bronze Parquet from disk.
+Ask Percy to confirm NOTES.md has the 21-22 Sep lines in his words.
+
+What are we even doing (say this first): the six functions do not change.
+Only the `__main__` block changes: `spark.read.parquet` becomes
+`spark.readStream.parquet`, two watermark lines are added, and `.show()`
+becomes a `writeStream` to Parquet. Same recipe, Spark re-runs it on new
+files as they land.
+
+One sub-step per message, full code with line comments (new Spark
+surface), prediction before each run:
+
+9a. **Streaming read needs a schema.** `spark.readStream.parquet(path)`
+    refuses to infer schema (verify live in 4.2.0 docs: either
+    `.schema(...)` or `spark.sql.streaming.schemaInference=true`). Mentor
+    lean: `bronze_schema = spark.read.parquet("data/bronze/arrivals").schema`
+    then `spark.readStream.schema(bronze_schema).parquet(...)`. Explain
+    why streaming can't infer: it would have to read files before the
+    query starts, and the files aren't all there yet. Prediction: the
+    DataFrame's `.isStreaming` is True; `.printSchema()` shows 22 fields.
+9b. **Watermark + streaming dedupe.** Put the streaming version of the
+    dedupe in a NEW function so tests keep the batch one:
+    `dedupe_predictions_stream(df)` =
+    `df.withWatermark("event_ts", "2 minutes")
+       .dropDuplicatesWithinWatermark([key])`. Teach: withWatermark is a
+    declaration ("event_ts is the event-time column; forget anything
+    older than newest-seen minus 2 min"), it changes no rows. Prediction:
+    no rows change; `.isStreaming` still True.
+9c. **Console sink first, tiny.** Wire kept -> expected_ts ->
+    dedupe_stream -> build_arrivals -> add_delay -> console, Append mode,
+    trigger 10 s. EXPECT AN ERROR OR A SURPRISE HERE and teach from it:
+    session_window in streaming REQUIRES the watermark on the same
+    event-time column (already there via dedupe_stream, good), and Append
+    mode emits a session only after the watermark passes session end +
+    gap. Also stacked stateful ops (dropDuplicatesWithinWatermark ->
+    session_window agg -> window agg) in ONE query: Spark 3.4+ supports
+    multiple stateful operators but check 4.2.0 docs live for the
+    session-window-after-another-stateful-op restriction BEFORE running.
+    DECISION to make with Percy (mentor lean = two jobs): job 1 = silver
+    arrivals stream (dedupe + session_window + delay) -> Parquet at
+    data/silver/arrivals, checkpoint data/checkpoints/silver_arrivals;
+    job 2 = window_reliability as batch (or a second stream) over silver.
+    Defensible architecture; probably the one to ship.
+9d. **Parquet sink.** Same shape as bronze: format parquet, path, own
+    checkpoint, Append, trigger 10 s, awaitTermination. Prediction: the
+    backlog drains in a handful of batches (bronze has ~50 files, not
+    1.6 M Kafka offsets); `data/checkpoints/silver_arrivals/commits/`
+    grows; then the stream idles.
+9e. **Compare streaming vs batch.** `spark.read.parquet("data/silver/
+    arrivals").count()` vs batch 39,222. Prediction: streaming count is
+    LOWER. Missing = the last session per (line, vehicle, naptan) per
+    collection day: nothing arrives after it to push the watermark past
+    session_end + 10 min, so Append never emits it. Two collection days ->
+    the 8 Sep tail DOES finalise when 9 Sep data arrives (watermark
+    jumps); only the 9 Sep tail stays open. Rough prediction: a few
+    hundred to ~2,000 arrivals short (one open session per key active in
+    the last ~10 min of 9 Sep). Count the exact difference, record it in
+    NOTES.md and README: this is the Week 9 "last window never finalises"
+    question, now measured, not theoretical. Options to discuss (do not
+    implement yet): Update output mode, a graceful-drain step, or
+    document as expected.
+10. **Day 5 kill/restart drill** on the silver stream, same shape as
+    bronze (Ctrl+C mid-drain, restart, count unchanged, commits resume).
+    Then Week 3 "done when" oral exam without notes.
+
+Then update this handoff, to_know.md (Percy's convention), and README
+(D15: silver two-job architecture; D16: last-session-never-finalises
+measured number).
+
+Carry-over still open: bronze for tfl.line-status and tfl.disruptions;
+retention.ms on those two topics unconfirmed; requirements.txt fix (add
+pyspark==4.2.0 and pytest); git line-ending renormalisation; test-name
+cosmetics above.
 
 ### Reference — original Day 3/4 sub-step plan as written 16 Sep (steps 1-5 done 17-18 Sep)
 

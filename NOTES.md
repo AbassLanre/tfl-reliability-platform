@@ -505,11 +505,44 @@ first and last windows of every collection session are edge-truncated; exclude o
 
 a 0-second delay and "no data" are different facts, and the dashboard should show them differently
 
+Refactored the silcer_arrivals.py into 6 functions and a if main, so that it can be imported into different loations e.g pytest
+
+min_by/max_by survived the streaming switch
+
+Append mode emits a session only after the watermark passes the session's end
+
+Two stateful operators keep two state stores on disk, on Windows, on local[2]
+
+decided to run two jobs for the window_reliability so it has its onw table is is debuggable when something breaks
+
+after running the stream and writing to parquet:
+Mentor said ~50 files, real number 774. The "handful of batches" prediction failed because I guessed at a number I could have counted.
+
+801 Parquet silver files for what should be under 40k rows. Small-files problem, parked for Week 7
+
+in the silver stage, : 39,222 − 34,179 = 5,043 arrivals missing, about 13%
+completed 28,854 − 27,031 = 1,823 missing. Incomplete 10,368 − 7,148 = 3,220 missing
+most of the missing rows are trains that were still approaching when collection stopped
+
+Append mode plus a 2-minute watermark plus a 10-minute session gap means the last 12 minutes of every collection run never leave Spark's state. Measured: 5,043 of 39,222 arrivals (12.9%), of which 3,220 were incomplete trains still on the board. Silver's newest arrival is 19:03:56, bronze's newest event is 19:16:06.
+
+My streaming job was 5,043 rows short of batch. I predicted a few hundred and was wrong. The gap was exactly watermark delay plus session gap, 12 minutes, and I proved it by measuring both timestamps to the second
+
+performed the kill drill, restarted the silver arrivals, stopped midway and then continued later, it didn't create a duplicate, checked the silver data and all good
+
+mentor predicted orphans, got none; kill probably landed before the write phase; the optional disk-vs-catalogue check from Day 2 has now been run once on silver and matched
+
+1. Your streaming read needed the schema handed to it, but the batch read didn't. Why does streaming refuse to work it out itself?
+2. withWatermark("event_ts", "2 minutes") changes zero rows. So what does it actually do, and why does the job need it at all? Two jobs, one number.
+3. Batch gave 39,222 arrivals, streaming gave 34,179. Explain the 5,043 gap, including where the 12 minutes comes from, and say whether the missing rows are lost for good or just not written yet.
+4. In the console run, Batches 0 to 3 were empty and Batch 4 had rows from 19:40. Why did the 19:40 sessions take four batches to appear?
+5. You killed the silver job mid-drain and restarted. Name the two ledgers, say which failure each one prevents, and say which one only Spark reads.
+6. You chose two jobs (D15). Give the reason you would give an interviewer, and one honest argument for the other choice.
 
 
-
-
-
-
-
-
+1. streaming requires us to give it a schema because it doesn't peek into the data before handling it, just as a conyeyor belt, the packages are placed on it to the place they are boxed, unlike batch that has all the data already boxed and a schema that changes mid-run would corrupt the query, so Spark refuses to guess
+2. it decides what is too late to accept, and therefore what is safe to forget, it changes no row but acts as an informer, in the sense that it just tells the dropDuplicateWithWatermark what column it has to watch as its watermark and the watermark duration
+3. the 5043 gap was from trains still approaching when collection was stopped, its the watermark delay plus the session gap, not lost. Those 5,043 sessions are sitting in the checkpoint's state store
+4. only after the watermark passes the session's end, goes past the first row's end 19:50, (19:52) does append occur to a batch, that's why it too that long
+5. ledger one is the checkpoint (data/checkpoints/silver_arrivals): which bronze files are done. Prevents gaps and sets the restart point, which is why you resumed at 2, Ledger two is _spark_metadata inside data/silver/arrivals: which Parquet files officially belong to the table, written only after a batch's files are all on disk. Prevents duplicates from half-written files.
+6. it is the purer streaming design, one checkpoint, one failure surface, lower latency for the windows because they don't wait for a second job, Debuggable, own table

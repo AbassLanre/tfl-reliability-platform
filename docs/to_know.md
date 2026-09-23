@@ -314,3 +314,64 @@ DataFrame is reused (Spark is lazy; a DataFrame is a recipe until cached),
 
 **Next:** 5-minute tumbling windows per line/station; refactor into
 functions; pytest; readStream switch with watermark + Append; Day 5 drill.
+(Windows, functions and pytest done 21-22 Sep, below.)
+
+## Week 3 Day 4 part 2 — windows, functions, pytest (21–22 Sep 2026)
+
+**Built:**
+- `window_reliability`: 5-minute tumbling `window("last_event_seen")` per
+  (line_id, naptan_id) over ALL arrivals, with conditional aggregates via
+  `when()`: n_total, n_completed, n_incomplete, and avg/min/max/p50/p99 of
+  delay_s over completed rows only. 13,602 windows; sums check exactly
+  (28,854 completed + 10,368 incomplete = 39,222). Windows with zero
+  completed arrivals show NULL delay stats on purpose.
+- Refactored `silver_arrivals.py` into six pure functions (DataFrame in,
+  DataFrame out) with the run under `if __name__ == "__main__":`. Same
+  numbers before and after.
+- `tests/conftest.py` (session-scoped SparkSession fixture, local[1], UTC,
+  shuffle.partitions=1) and `tests/test_silver_arrivals.py`: 5 tests,
+  hand-made rows via `spark.createDataFrame`, `5 passed` in ~20 s. Run:
+  `python -m pytest tests -q`.
+
+**Learned:**
+- session_window splits by silence in the data (identity: which trip);
+  window splits by the clock (grain: which reporting bucket). Each arrival
+  has one last_event_seen, so it lands in exactly one 5-min bucket and the
+  buckets sum cleanly into hourly marts.
+- `when(cond, value)` is a per-row if that returns null otherwise; count/
+  avg/max skip nulls, so one groupBy can carry both completed and
+  not-completed counts.
+- A 0-second delay and "no data" are different facts; never coalesce the
+  NULL to 0.
+- First and last windows of every collection session are edge-truncated
+  (trains mid-approach at start, still on the board at end). Flag or
+  exclude in the marts.
+- Why functions before streaming: pytest and the stream must run the SAME
+  code. The `__main__` guard is what lets a test import the recipe without
+  cooking it (reading 1.6 M rows).
+- Why a fixture: Spark takes ~15 s to start; build it once per test run,
+  hand it to every test.
+- Tests guard the bugs I actually found: two trips 70 min apart -> 2 rows
+  (session_window); delay -120 when the forecast improves (min_by/max_by;
+  plain min/max would give +120); completed at 60 True / 61 False.
+- Mentor prediction miss: 12,330 completed-only windows vs a 15-25k guess
+  (about 2.3 completed arrivals per line/station/5-min bucket).
+
+**Interview sentences:**
+- "Session windows are data-driven, tumbling windows are clock-driven. I
+  use the first to define what an arrival is and the second to report on
+  it."
+- "I refactored the silver job into pure DataFrame-in, DataFrame-out
+  functions so the batch run, the streaming run and the tests share one
+  implementation. The tests are five hand-made-row cases, each guarding a
+  bug I hit for real."
+- "Conditional aggregation lets one groupBy produce both the completed
+  count and the incomplete count per window, so a window where every
+  train vanished exists as a row that says 0 completed, 3 incomplete.
+  That row is a disruption signal; before, it did not exist."
+
+**Next:** step 9, the streaming switch: readStream on bronze Parquet with
+the schema supplied, withWatermark + dropDuplicatesWithinWatermark, Append
+to Parquet at data/silver/arrivals with its own checkpoint; compare
+streaming count to batch 39,222 and measure the "last session never
+finalises" gap; then Day 5 kill/restart drill.

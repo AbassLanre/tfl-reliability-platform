@@ -16,6 +16,12 @@ def add_expected_ts(df):
 def dedupe_predictions(df):
     return df.dropDuplicates(["line_id", "vehicle_id", "naptan_id", "event_ts"])
 
+def dedupe_predictions_within_stream(df):
+    return (df
+            .withWatermark("event_ts","2 minutes")
+            .dropDuplicatesWithinWatermark(["line_id", "vehicle_id", "naptan_id", "event_ts"])
+)
+
 def build_arrivals(df, gap= "10 minutes"):
     return (
         df.groupBy(session_window("event_ts", gap), "line_id", "vehicle_id", "naptan_id")
@@ -52,20 +58,40 @@ if __name__ == "__main__":
     .config("spark.sql.session.timeZone", "UTC")
     .getOrCreate()
     )
-    bronze = spark.read.parquet("data/bronze/arrivals")
-
+    # Batch read once, only to learn the shape (22 columns and their types).
+    bronze_schema = spark.read.parquet("data/bronze/arrivals").schema
+    # Streaming read: same folder, but we hand it the shape up front,
+    # because it will not peek at files itself (they may not exist yet).
+    bronze = (spark.readStream
+              .schema(bronze_schema)
+              .option("maxFilesPerTrigger", 200)
+              .parquet("data/bronze/arrivals")
+)
     kept, unattributable = split_unattributable(bronze)
     kept = add_expected_ts(kept)
-    kept = dedupe_predictions(kept)
-    grouped_kept = build_arrivals(kept, gap="10 minutes")
-    grouped_kept = add_delay(grouped_kept).cache()
-    windowed_kept = window_reliability(grouped_kept)
-    windowed_kept.show(truncate=False)
+    preds = dedupe_predictions_within_stream(kept)
+    grouped = build_arrivals(preds, gap="10 minutes")
+    grouped = add_delay(grouped)
+    
+    query = (
+        grouped.writeStream
+        .format("parquet")
+        .outputMode("append")
+        .option("path", "data/silver/arrivals")
+        .option("checkpointLocation", "data/checkpoints/silver_arrivals")
+        .trigger(processingTime="10 seconds")
+        .queryName("silver_arrivals")
+        .start()
+    )
+    
+    query.awaitTermination()
+    # windowed_kept = window_reliability(grouped_kept)
+    # windowed_kept.show(truncate=False)
 
-    windowed_kept.agg(
-        sum_("n_incomplete").alias("total_incomplete_arrivals"),
-        sum_("n_completed").alias("total_completed_arrivals"),
-        sum_("n_total").alias("total_arrivals"),
-        count("*").alias("n_windows"),
-    ).show(truncate=False)
+    # windowed_kept.agg(
+    #     sum_("n_incomplete").alias("total_incomplete_arrivals"),
+    #     sum_("n_completed").alias("total_completed_arrivals"),
+    #     sum_("n_total").alias("total_arrivals"),
+    #     count("*").alias("n_windows"),
+    # ).show(truncate=False)
 
