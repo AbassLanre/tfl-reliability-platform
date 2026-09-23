@@ -375,3 +375,65 @@ the schema supplied, withWatermark + dropDuplicatesWithinWatermark, Append
 to Parquet at data/silver/arrivals with its own checkpoint; compare
 streaming count to batch 39,222 and measure the "last session never
 finalises" gap; then Day 5 kill/restart drill.
+
+## Week 3 Day 5 — the streaming switch, gap measured, kill drill, exam (23 Sep 2026)
+
+**Built:** `silver_arrivals.py` `__main__` is now a streaming job. Six
+functions untouched. `spark.read.parquet` -> `spark.readStream.schema(
+bronze_schema).option("maxFilesPerTrigger", 200).parquet(...)`; new
+`dedupe_predictions_within_stream` = `withWatermark("event_ts", "2 minutes")
++ dropDuplicatesWithinWatermark(key)`; `.show()` -> `writeStream` Parquet at
+`data/silver/arrivals`, own checkpoint, Append, 10 s trigger. Batch dedupe
+kept for the tests; `5 passed` still. `check_silver.py` counts silver.
+
+**Decided (D15, mine):** two jobs. Job 1 streams arrivals to Parquet; job 2
+runs `window_reliability` as batch over that table. Own table per stage, so
+when something breaks I can see which stage. Honest counter-argument: one
+job is purer, one checkpoint, lower latency for the windows.
+
+**Learned / broke:**
+- Streaming file sources refuse to infer schema (conveyor belt: you set the
+  box size before the boxes exist; a schema changing mid-run would corrupt
+  the query). Fix: peek once with the batch reader, hand the schema over.
+- Spark 4.2.0 runs dedupe + session_window chained in ONE Append query. The
+  docs did not promise it; I proved it by running it.
+- Append emits a session only when the watermark passes the session end.
+  Four empty batches before the first rows appeared, because each batch
+  only moved the clock a couple of minutes and the watermark from batch N
+  applies in batch N+1.
+- **Streaming 34,179 vs batch 39,222 = 5,043 short (12.9 %).** Not "the last
+  session per key": a TIME CUT-OFF of watermark delay + session gap = 12
+  minutes. Proved to the second: silver max last_event_seen 19:03:56, bronze
+  max event_ts 19:16:06. Those rows are NOT lost, they sit in state waiting
+  for one more event. This is D16 and the Week 9 open question, now a
+  measured number. Update mode is off the table (session_window unsupported).
+- Bronze has 774 Parquet files, not "~50"; at 10 files/batch the drain would
+  take 2.5 h. Count before predicting. Silver wrote 801 tiny files for 34k
+  rows: small-files problem, parked for Week 7.
+- Every batch took ~2 min against a 10 s trigger: two state stores on a
+  laptop. Recurring "falling behind" = sizing signal, not a bug today.
+- Kill drill: Ctrl+C after commit 1, restart resumed at commit 2, final
+  count identical to the row. No orphan files this time (mentor predicted
+  some; kill landed before the write stage).
+- Four mentor predictions wrong today; the prediction habit caught all four.
+
+**Exam (no notes):** 3 pass / 2 half / 1 fail. Misses were the same shape
+both times: I gave the mechanism and skipped the failure it prevents.
+Watermark = bounded state FIRST. Two ledgers: checkpoint prevents gaps,
+_spark_metadata prevents duplicates, only Spark reads the second. Re-drill
+next session.
+
+**Interview sentences:**
+- "I switched silver from batch to streaming by changing only the entry
+  point; the six transform functions and their tests did not change."
+- "My stream was 5,043 rows short of batch. I predicted a few hundred and
+  was wrong. The gap was exactly watermark delay plus session gap, twelve
+  minutes, and I proved it by measuring both timestamps to the second."
+- "Append mode never writes a session until the watermark passes it, so the
+  last twelve minutes of any collection run stay in state. In production the
+  stream never ends, so I documented it rather than hacking around it."
+- "I chose two jobs so each stage has its own table and its own failure
+  surface. One job would be purer and lower latency; I know what I gave up."
+
+**Next:** README D15/D16 in my words; job 2 (window_reliability batch over
+silver); re-drill exam Q2/Q5; then Week 4 Snowflake with bootstrap.sql first.

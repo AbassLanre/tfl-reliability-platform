@@ -23,7 +23,7 @@ data-engineering-mentor skill first.
 - Keep NOTES.md entries for every bug/decision (Week 10 needs it). Percy
   keeps NOTES.md live DURING sessions, in his own words — this is working.
 
-## Project status (as of 2026-09-22)
+## Project status (as of 2026-09-23)
 
 - Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 ✅, Day 2 ✅, Day 3 design ✅,
   Day 3 concepts ✅ (17 Sep: state / bounded state / watermark bounds it),
@@ -33,10 +33,13 @@ data-engineering-mentor skill first.
   Day 4 part 2 ✅ (21-22 Sep: 5-min tumbling windows, refactor into six
   pure functions with __main__ guard, pytest x5 green). Commits b5b5672,
   bce0447, fbacbcc.
-  NEXT = Step 9: streaming switch (read -> readStream on bronze Parquet,
-  withWatermark + dropDuplicatesWithinWatermark + Append, Parquet sink at
-  data/silver/arrivals), then Day 5 kill/restart drill.
-  + Append), then pytest on the transforms, then Day 5 kill/restart drill.
+  Step 9 ✅ + Day 5 drill ✅ + Week 3 oral exam (3/2/1) ✅ (23 Sep: readStream
+  on bronze Parquet, watermark + dropDuplicatesWithinWatermark, Append to
+  Parquet data/silver/arrivals, 34,179 rows vs batch 39,222 = 12-minute
+  cut-off measured; kill/restart resumed at 2, count identical). Commit
+  5f79d0a. **WEEK 3 DONE.** README D15/D16 still to write (Percy).
+  NEXT = see "NEXT (start here)" below: exam re-drill Q2/Q5, README D15/D16,
+  job 2 (window_reliability batch), then Week 4 Snowflake.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
   and rewrites in his own voice; keep it updated at each week boundary.
@@ -193,7 +196,7 @@ data-engineering-mentor skill first.
   = interview story. (Honesty note discussed: trial-cycling is a ToS grey
   area; paid on-demand would cost pence at this usage — Percy's call.)
 
-## Week 3 — IN PROGRESS (Spark Structured Streaming, local)
+## Week 3 — DONE 2026-09-23 (Spark Structured Streaming, local)
 
 ### Decisions made (2026-09-04)
 
@@ -724,83 +727,125 @@ test file; a mentor `git status` left a stale `.git/index.lock` once
   notices when mine are wrong. Two mentor misses this session (12,330 rows;
   earlier 15-25k guess). Say so plainly.
 
-### NEXT (start here): Step 9 — the streaming switch
+### Step 9 + Day 5 — DONE (2026-09-23): streaming switch, Parquet sink, gap measured, drill passed
 
-Pre-flight: fresh terminal (PATH has C:\hadoop\bin), venv active,
-`python -m pytest tests -q` -> `5 passed` (proves the functions still
-import). Kafka is NOT needed: silver reads bronze Parquet from disk.
-Ask Percy to confirm NOTES.md has the 21-22 Sep lines in his words.
+Commit 5f79d0a. Files: `streaming/silver_arrivals.py` (six functions unchanged;
+new `dedupe_predictions_within_stream`; `__main__` is now a streaming job),
+`streaming/check_silver.py` (batch reader over silver + bronze max event_ts).
 
-What are we even doing (say this first): the six functions do not change.
-Only the `__main__` block changes: `spark.read.parquet` becomes
-`spark.readStream.parquet`, two watermark lines are added, and `.show()`
-becomes a `writeStream` to Parquet. Same recipe, Spark re-runs it on new
-files as they land.
+**Verified live (spark.apache.org, 4.2.0 docs, 2026-09-23):** file-based
+streaming sources require the schema (or `spark.sql.streaming.schemaInference`);
+chaining multiple stateful operators is supported in Append mode (banned in
+Update/Complete); session_window does not support Update mode and needs at
+least one extra grouping column. Docs do NOT say whether session_window may
+follow dropDuplicatesWithinWatermark — we RAN it and it works on 4.2.0.
 
-One sub-step per message, full code with line comments (new Spark
-surface), prediction before each run:
+**Sub-steps and results (prediction -> actual):**
+- 9a schema: `bronze_schema = spark.read.parquet(...).schema` then
+  `spark.readStream.schema(bronze_schema).option("maxFilesPerTrigger", 200)
+  .parquet(...)`. isStreaming True, 22 fields. Prediction matched.
+- 9b watermark: `dedupe_predictions_within_stream(df)` =
+  `withWatermark("event_ts","2 minutes").dropDuplicatesWithinWatermark([key])`.
+  Batch `dedupe_predictions` kept for the tests. 23 fields after
+  add_expected_ts. Prediction matched. Percy wrote it from a hint in one swing.
+- 9c console sink: dedupe -> session_window -> add_delay in ONE Append query.
+  NO error (two stateful ops chained). Batches 0-3 EMPTY, Batch 4 first rows
+  (19:40 sessions). Mentor predicted rows by Batch 1: WRONG. Reason: Append
+  emits a session only when watermark > session end (= last event + 10 min
+  gap); watermark advances only as new events arrive; watermark from batch N
+  applies in batch N+1. Each 10-file batch moved the clock ~2 min, so four
+  batches to pass 19:50. `delay_s = -23` row proved min_by/max_by survived.
+  Every batch 105-123 s vs 10 s trigger — RECURRING "falling behind" (two
+  state stores, Windows, local[2]). Noted, not blocking.
+- **D15 DECISION (Percy's): two jobs.** Job 1 = this stream -> Parquet
+  `data/silver/arrivals`, checkpoint `data/checkpoints/silver_arrivals`.
+  Job 2 = `window_reliability` as BATCH over silver (not yet written).
+  His reason: own table per stage, debuggable when something breaks.
+  Mentor's honest counter-argument for one job: purer streaming, one
+  checkpoint, one failure surface, lower latency for the windows.
+- 9d Parquet sink: first run with maxFilesPerTrigger=10 — mentor said "~50
+  bronze files, 5-7 batches". WRONG: bronze has **774** Parquet files (81
+  bronze batches x several date/hour partitions), so 78 batches x 2 min.
+  Stopped at commit 10, changed to 200, deleted silver + checkpoint, reran:
+  commits 0-4 (mentor predicted 4; the 5th batch read no files, it flushed
+  sessions closed by batch 3's watermark). Silver = **801** Parquet files for
+  34k rows: SMALL-FILES PROBLEM, parked for Week 7.
+- 9e count: silver **34,179** rows / 27,031 completed / max last_event_seen
+  **2026-09-09 19:03:56**. Batch 39,222 / 28,854. Gap **5,043 (12.9 %)**:
+  1,823 completed + 3,220 incomplete. Mentor predicted "a few hundred to
+  2,000": WRONG by 2.5x. Mentor's picture "last session per key" was also
+  wrong. Right picture: a TIME CUT-OFF. Session written only when watermark
+  (newest event − 2 min) > session end (last event + 10 min) => any session
+  with last event later than newest − 12 min is stuck in state. VERIFIED:
+  bronze max event_ts = **19:16:06**, silver max = 19:03:56, difference
+  12 min 10 s. Rows are NOT lost: they sit in the checkpoint state store and
+  would flush if one more event arrived. **D16** = this paragraph.
+  Week 9 options (not implemented): document as expected (continuous
+  collection never ends); graceful drain via synthetic future event; Update
+  mode is OFF the table (session_window unsupported, docs).
+- Day 5 drill: clean start, Ctrl+C ~1 min after commit 1, restart ->
+  first new commit **2** (not 0); drained to 4; check_silver identical to
+  the row (34,179 / 27,031 / 19:03:56). Disk parquet count 801 == clean run:
+  mentor predicted orphans, got NONE (kill probably landed before the write
+  stage of batch 2). Disk-vs-catalogue check has now been run once on silver.
+- pytest still `5 passed` after the switch (functions untouched).
 
-9a. **Streaming read needs a schema.** `spark.readStream.parquet(path)`
-    refuses to infer schema (verify live in 4.2.0 docs: either
-    `.schema(...)` or `spark.sql.streaming.schemaInference=true`). Mentor
-    lean: `bronze_schema = spark.read.parquet("data/bronze/arrivals").schema`
-    then `spark.readStream.schema(bronze_schema).parquet(...)`. Explain
-    why streaming can't infer: it would have to read files before the
-    query starts, and the files aren't all there yet. Prediction: the
-    DataFrame's `.isStreaming` is True; `.printSchema()` shows 22 fields.
-9b. **Watermark + streaming dedupe.** Put the streaming version of the
-    dedupe in a NEW function so tests keep the batch one:
-    `dedupe_predictions_stream(df)` =
-    `df.withWatermark("event_ts", "2 minutes")
-       .dropDuplicatesWithinWatermark([key])`. Teach: withWatermark is a
-    declaration ("event_ts is the event-time column; forget anything
-    older than newest-seen minus 2 min"), it changes no rows. Prediction:
-    no rows change; `.isStreaming` still True.
-9c. **Console sink first, tiny.** Wire kept -> expected_ts ->
-    dedupe_stream -> build_arrivals -> add_delay -> console, Append mode,
-    trigger 10 s. EXPECT AN ERROR OR A SURPRISE HERE and teach from it:
-    session_window in streaming REQUIRES the watermark on the same
-    event-time column (already there via dedupe_stream, good), and Append
-    mode emits a session only after the watermark passes session end +
-    gap. Also stacked stateful ops (dropDuplicatesWithinWatermark ->
-    session_window agg -> window agg) in ONE query: Spark 3.4+ supports
-    multiple stateful operators but check 4.2.0 docs live for the
-    session-window-after-another-stateful-op restriction BEFORE running.
-    DECISION to make with Percy (mentor lean = two jobs): job 1 = silver
-    arrivals stream (dedupe + session_window + delay) -> Parquet at
-    data/silver/arrivals, checkpoint data/checkpoints/silver_arrivals;
-    job 2 = window_reliability as batch (or a second stream) over silver.
-    Defensible architecture; probably the one to ship.
-9d. **Parquet sink.** Same shape as bronze: format parquet, path, own
-    checkpoint, Append, trigger 10 s, awaitTermination. Prediction: the
-    backlog drains in a handful of batches (bronze has ~50 files, not
-    1.6 M Kafka offsets); `data/checkpoints/silver_arrivals/commits/`
-    grows; then the stream idles.
-9e. **Compare streaming vs batch.** `spark.read.parquet("data/silver/
-    arrivals").count()` vs batch 39,222. Prediction: streaming count is
-    LOWER. Missing = the last session per (line, vehicle, naptan) per
-    collection day: nothing arrives after it to push the watermark past
-    session_end + 10 min, so Append never emits it. Two collection days ->
-    the 8 Sep tail DOES finalise when 9 Sep data arrives (watermark
-    jumps); only the 9 Sep tail stays open. Rough prediction: a few
-    hundred to ~2,000 arrivals short (one open session per key active in
-    the last ~10 min of 9 Sep). Count the exact difference, record it in
-    NOTES.md and README: this is the Week 9 "last window never finalises"
-    question, now measured, not theoretical. Options to discuss (do not
-    implement yet): Update output mode, a graceful-drain step, or
-    document as expected.
-10. **Day 5 kill/restart drill** on the silver stream, same shape as
-    bronze (Ctrl+C mid-drain, restart, count unchanged, commits resume).
-    Then Week 3 "done when" oral exam without notes.
+**Week 3 oral exam (no notes, 6 Qs asked at once at Percy's request):**
+3 pass (schema, gap arithmetic, four-empty-batches), 2 half (watermark: gave
+mechanism, missed bounded-state WHY; D15: gave own reason, missed the
+counter-argument), 1 fail (two ledgers — knew "duplicates", couldn't name
+checkpoint vs _spark_metadata under pressure; he HAS this in NOTES.md from
+11 Sep). Pattern: reaches for mechanism, skips the failure it prevents.
+Percy pasted the corrected answers into NOTES.md the same night.
+**Re-drill Q2 and Q5 at the start of next session.**
 
-Then update this handoff, to_know.md (Percy's convention), and README
-(D15: silver two-job architecture; D16: last-session-never-finalises
-measured number).
+**Teaching notes (23 Sep):**
+- Four mentor predictions wrong today (rows by batch 1; ~50 files; gap size;
+  orphans). Saying so plainly kept trust. COUNT things before predicting them
+  (774 files was one `find | wc -l` away).
+- "Check the code" x2, both times he wanted review; numbered list, most
+  important first, worked again.
+- He asked for all six exam questions at once and answered all six at once.
+  Fine for him; mark most-important-first.
+- One idea per message + predicted output held all session; no pushback on
+  density this time.
 
-Carry-over still open: bronze for tfl.line-status and tfl.disruptions;
-retention.ms on those two topics unconfirmed; requirements.txt fix (add
-pyspark==4.2.0 and pytest); git line-ending renormalisation; test-name
-cosmetics above.
+**Code cosmetics still open:** dead commented `window_reliability` lines at
+the bottom of `silver_arrivals.py` `__main__`; unused imports in both
+silver_arrivals.py (`count_distinct`) and check_silver.py; check_silver
+appName says "silver_arrivals".
+
+### NEXT (start here): close Week 3 paperwork, then Week 4 (Snowflake) per build plan v1.2
+
+Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> `5 passed`.
+
+1. **Re-drill exam Q2 and Q5** (two minutes, no notes): (Q2) why the
+   watermark exists — bounded state FIRST, mechanism second; (Q5) two ledgers
+   — checkpoint prevents gaps, _spark_metadata prevents duplicates, only
+   Spark reads the second. Failure mode first, then mechanism.
+2. **README D15 + D16 are NOT yet written** (checked 23 Sep: README stops at
+   D14). Percy writes both in his words from the NOTES.md lines; mentor
+   reviews. D15 = two-job architecture + counter-argument; D16 = the
+   12-minute cut-off with the 5,043 / 19:03:56 / 19:16:06 numbers and the
+   three Week 9 options.
+3. **Job 2:** `streaming/window_reliability_batch.py` (name TBD with Percy):
+   batch `spark.read.parquet("data/silver/arrivals")` -> `window_reliability`
+   -> print/summary. Predicted: sums n_completed 27,031 / n_total 34,179;
+   window count below 13,602. Hint-level (he has check_silver.py). Optional:
+   write it to `data/silver/window_reliability` Parquet.
+4. Cosmetics from "Code cosmetics still open" above; requirements.txt fix
+   (add pyspark==4.2.0, pytest; UTF-8); git line-ending renormalisation.
+5. **Week 4 = Snowflake** (see "Snowflake status" above and the build plan
+   PDF for the week's exact deliverables): new trial, Standard / AWS /
+   eu-west-2, FIRST write `snowflake/bootstrap.sql` so the environment is
+   code, then reconnect dbt (only the account field changes). Interview
+   framing: "trial expired -> I automated the rebuild."
+
+Carry-over still open: bronze for tfl.line-status and tfl.disruptions
+(simple copies, no watermark); retention.ms on those two topics
+unconfirmed; check_bronze.py tidy; small-files problem (Week 7); orphan
+files vs non-Spark readers (Week 7); per-key gap distribution to revisit
+the 10-min session gap (needs lag window function, not taught yet).
 
 ### Reference — original Day 3/4 sub-step plan as written 16 Sep (steps 1-5 done 17-18 Sep)
 
