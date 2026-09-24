@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, count_distinct, session_window, count, when, min as min_, min_by, max as max_, max_by,sum as sum_, avg, percentile, to_timestamp, window
+    col, session_window, count, when, min as min_, min_by, max as max_, max_by,sum as sum_, avg, percentile, to_timestamp, window
 )
 
 
@@ -85,13 +85,5 @@ if __name__ == "__main__":
     )
     
     query.awaitTermination()
-    # windowed_kept = window_reliability(grouped_kept)
-    # windowed_kept.show(truncate=False)
-
-    # windowed_kept.agg(
-    #     sum_("n_incomplete").alias("total_incomplete_arrivals"),
-    #     sum_("n_completed").alias("total_completed_arrivals"),
-    #     sum_("n_total").alias("total_arrivals"),
-    #     count("*").alias("n_windows"),
-    # ).show(truncate=False)
+ 
 

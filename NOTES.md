@@ -546,3 +546,7 @@ mentor predicted orphans, got none; kill probably landed before the write phase;
 4. only after the watermark passes the session's end, goes past the first row's end 19:50, (19:52) does append occur to a batch, that's why it too that long
 5. ledger one is the checkpoint (data/checkpoints/silver_arrivals): which bronze files are done. Prevents gaps and sets the restart point, which is why you resumed at 2, Ledger two is _spark_metadata inside data/silver/arrivals: which Parquet files officially belong to the table, written only after a batch's files are all on disk. Prevents duplicates from half-written files.
 6. it is the purer streaming design, one checkpoint, one failure surface, lower latency for the windows because they don't wait for a second job, Debuggable, own table
+
+created the window_reliability_batch file as the second job after writing the data/silver/arrivals
+
+it had 12,546 windows and the sum in it (n_total) matches the silver count
