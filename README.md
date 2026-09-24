@@ -231,11 +231,53 @@ processing time into the metric and is not reproducible on replay.
 Caveat, stated plainly: this is forecast drift, not lateness against a
 timetable. There is no timetable in this feed.
 
+### D15. Two jobs for silver, not one
+Silver is split in two. Job 1 is the stream: bronze Parquet in, dedupe
+within the watermark, session windows, delay, Append to
+`data/silver/arrivals` with its own checkpoint. Job 2 is
+`window_reliability`, run as a batch over that table.
+
+My reason: every stage gets its own table. When a number looks wrong I can
+open the table before it and the table after it and see which stage broke,
+instead of debugging inside one long running query.
+
+The honest case for one job: it is the purer streaming design. One
+checkpoint, one failure surface, and the 5-minute windows would land
+seconds after the arrival finalises instead of waiting for a second job to
+run. I know what I gave up. If latency on the windows ever matters more
+than debuggability, this decision flips.
+
+### D16. The 12-minute cut-off (measured)
+Streaming silver holds **34,179** arrivals. The same six functions run as a
+batch over the same bronze give **39,222**. The gap is **5,043 (12.9 %)**:
+1,823 completed and 3,220 not completed.
+
+I predicted a few hundred and was wrong. The gap is not "the last session
+per key". It is a time cut-off. Append mode writes a session only when the
+watermark (newest event minus 2 minutes) is past the session end (last
+event plus the 10-minute gap). So any session whose last event is inside
+the newest 12 minutes of data is still sitting in state. Proof to the
+second: bronze's newest `event_ts` is 19:16:06, silver's newest
+`last_event_seen` is 19:03:56, difference 12 min 10 s.
+
+Those rows are not lost. They are in the checkpoint's state store and would
+be written the moment one more event moved the watermark. In production the
+feed never stops, so the cut-off only bites at the tail of a collection
+run.
+
+Options for Week 9, not decided yet:
+1. Document it as expected and flag the last 12 minutes of every run in
+   the marts (cheapest, honest).
+2. Graceful drain: push one synthetic future event through at shutdown so
+   the watermark passes everything.
+3. Update output mode is off the table: `session_window` does not support
+   it (Spark 4.2.0 docs, checked 23 Sep 2026).
+
 ### Known limitations (so far)
 - Session-based collection: every train still on the board when the
-  producer stops looks like a lost train, and the last event-time window of
-  a session never finalises in Append mode. Documented; handling decided in
-  Week 9.
+  producer stops looks like a lost train, and the last 12 minutes of every
+  run stay in Spark state in Append mode (D16, measured: 5,043 arrivals).
+  Handling decided in Week 9.
 - Single broker, replication factor 1: fine on one laptop, not a
   production topology.
 - Windows host: hadoop.dll / winutils are required for Spark file sinks
@@ -252,8 +294,14 @@ timetable. There is no timetable in this feed.
 | watermark | 2 minutes |
 | distinct arrivals in the Day 3 sample | 16,928 |
 | lowest countdown per arrival p50 / p99 | 18 s / 1,580 s |
-| completed arrivals (≤ 60 s) | 86.6 % |
+| completed arrivals (≤ 60 s), before session split (Day 3) | 86.6 % |
+| completed arrivals (≤ 60 s), after 10-min session split (Day 4) | 73.6 % |
 | `vehicle_id = 000` share | 1.06 % |
+| arrivals with 10-min session gap, batch | 39,222 (28,854 completed) |
+| 5-minute windows, batch | 13,602 |
+| arrivals in streaming silver | 34,179 (27,031 completed) |
+| streaming vs batch gap | 5,043 = the 12-minute cut-off |
+| silver kill/restart drill | killed after commit 1, resumed at 2, count identical |
 | Snowflake trial spend after 9 days (Week 1) | $3.50 |
 | total cloud spend to date | TODO |
 
