@@ -437,3 +437,58 @@ next session.
 
 **Next:** README D15/D16 in my words; job 2 (window_reliability batch over
 silver); re-drill exam Q2/Q5; then Week 4 Snowflake with bootstrap.sql first.
+(Done 24 Sep, below.)
+
+## Week 3 close-out + Week 4 Day 1 — S3 buckets (24 Sep 2026)
+
+**Done:**
+- Exam re-drill: watermark = RAM climbs without it (bounded state first),
+  then the one-number sentence. Two ledgers: checkpoint prevents gaps,
+  _spark_metadata prevents duplicates, only Spark reads the second.
+- README D15, D16, D17 written; Numbers table shows both completed shares
+  (86.6 % before session split, 73.6 % after) labelled by stage.
+- Job 2: `streaming/window_reliability_batch.py`, batch over silver,
+  writes `data/silver/window_reliability`. 12,546 windows, sums 27,031 /
+  34,179 match silver exactly. 2 Parquet files for 12.5k rows vs the
+  stream's 801 files for 34k: this is what a batch write looks like.
+- requirements.txt rewritten as 7 UTF-8 pins. `.gitattributes` `* text=auto`
+  committed; repo copies were already LF, `git add .` is safe again.
+- Week 4 Day 1: buckets `tfl-reliability-raw-percy` and
+  `tfl-reliability-processed-percy` in eu-west-2, block public access on,
+  versioning off, SSE-S3, ACLs disabled. Made as IAM user, not root. Write
+  test with `aws s3 cp/ls/rm` passed.
+
+**Decided (D17):** bronze goes to S3 and through Snowpipe into RAW, because
+bronze is the rebuild point (I rebuilt silver from it twice in Week 3) and
+Week 5's dbt staging expects RAW that still needs casting. Silver tables go
+to S3 too and dbt reads them. Snowflake trial is created only on Day 3 so
+the 30-day clock does not start before S3 works.
+
+**Learned:**
+- Spark and dbt are used together everywhere; the question is where the
+  line sits. Thin Spark: Spark lands raw, dbt does everything. Thick Spark
+  (mine): Spark does silver because it needs streaming tools (watermark,
+  session windows) that scheduled SQL cannot do; dbt builds tested marts on
+  top. Overlap: bronze gets cast twice. I know and accept it.
+- PowerShell `>` writes UTF-16. `echo hello > hello.txt` was 16 bytes.
+  Create text files in the editor.
+- hadoop-aws 3.5.0 (matches the Hadoop bundled in PySpark 4.2.0, checked on
+  my machine) does NOT read ~/.aws/credentials by default; it needs
+  `fs.s3a.aws.credentials.provider` set to the SDK v2
+  ProfileCredentialsProvider. Verified in the Hadoop 3.5.0 docs.
+- Root vs IAM: root for billing only; every resource is created as the IAM
+  user so a leaked key costs one user, not the account.
+
+**Interview sentences:**
+- "I keep bronze in S3 because it is the rebuild point. I changed my delay
+  metric twice in a week and recomputed silver in minutes each time; if only
+  silver had been in the warehouse those would have been wrong numbers I
+  could not fix."
+- "Spark owns what must be fresh, dbt owns what must be tested and joined.
+  The casting happens twice and I can say why."
+- "The Snowflake trial expired, so I automated the environment rebuild and
+  I start the new clock only when the upstream is ready."
+
+**Next:** Week 4 Day 2, Spark bronze sink to s3a:// (smoke test with
+spark.range(5) first, then the stream, 5-minute trigger for S3, checkpoint
+local for now).

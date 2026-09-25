@@ -37,9 +37,12 @@ data-engineering-mentor skill first.
   on bronze Parquet, watermark + dropDuplicatesWithinWatermark, Append to
   Parquet data/silver/arrivals, 34,179 rows vs batch 39,222 = 12-minute
   cut-off measured; kill/restart resumed at 2, count identical). Commit
-  5f79d0a. **WEEK 3 DONE.** README D15/D16 still to write (Percy).
-  NEXT = see "NEXT (start here)" below: exam re-drill Q2/Q5, README D15/D16,
-  job 2 (window_reliability batch), then Week 4 Snowflake.
+  5f79d0a. **WEEK 3 DONE.**
+  24 Sep: Week 3 paperwork closed (exam re-drill passed, README D15/D16/D17,
+  job 2 `streaming/window_reliability_batch.py` 12,546 windows, cosmetics,
+  requirements.txt UTF-8 curated, .gitattributes). **WEEK 4 STARTED:** Day 1
+  done (two S3 buckets, IAM write test). NEXT = see "NEXT (start here)":
+  Week 4 Day 2 = Spark bronze sink to s3a://.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
   and rewrites in his own voice; keep it updated at each week boundary.
@@ -53,7 +56,10 @@ data-engineering-mentor skill first.
   bronze has two date= folders but the same rows. Folder sizes:
   date=2026-09-08 ~4 MB (hours 19-20), date=2026-09-09 ~37 MB (hours 16-19).
   Mentor predicted one folder and was wrong; Percy's count was right.
-- Still commit by filename, not `git add .`, until line endings are fixed.
+- ~~Still commit by filename~~ FIXED 24 Sep: repo copies were already LF
+  (`git ls-files --eol` showed i/lf on all 25 CRLF-on-disk files, so
+  renormalise had nothing to do). `.gitattributes` with `* text=auto`
+  committed; `git add .` is safe again.
 - check_bronze.py has grown into a scratchpad of commented-out exploration
   blocks (id counts, hypothesis tests, lowest_tts). Fine for now; when
   silver starts, move the useful queries into a proper
@@ -169,12 +175,11 @@ data-engineering-mentor skill first.
   `.gitattributes` with `* text=auto`, then renormalise
   (`git add --renormalize .`) in ONE dedicated commit. Also: commit 222aa0a's
   message starts with a stray `"` — PowerShell quoting; cosmetic.
-- **requirements.txt is UTF-16 LE with BOM and CRLF** (PowerShell
-  `pip freeze >` default) and is a full 93-line freeze including dbt's
-  transitive deps. Committed that way. Will break `pip install -r` on
-  Linux (Week 8 GitHub Actions). Fix pending: re-export as UTF-8
-  (`pip freeze | Out-File -Encoding utf8`) or, better, curate a short
-  top-level list. Add pyspark==4.2.0 when doing this.
+- **requirements.txt FIXED 24 Sep**: UTF-8, 7 curated pins (confluent-kafka
+  2.15.0, python-dotenv 1.2.3, requests 2.33.0, pyspark 4.2.0, dbt-core
+  1.11.12, dbt-snowflake 1.11.6, pytest 9.1.1). Lesson: PowerShell `>`
+  writes UTF-16; create files in the editor. (Seen again with `echo hello >`
+  = 16 bytes.)
 - Docker Desktop; remember habit: `docker compose down` the fintech Airflow
   stack before Kafka/Spark sessions.
 - Kafka CLI tools: docker exec -it kafka /opt/kafka/bin/<tool>.sh
@@ -815,31 +820,104 @@ the bottom of `silver_arrivals.py` `__main__`; unused imports in both
 silver_arrivals.py (`count_distinct`) and check_silver.py; check_silver
 appName says "silver_arrivals".
 
-### NEXT (start here): close Week 3 paperwork, then Week 4 (Snowflake) per build plan v1.2
+### Week 4 — STARTED 2026-09-24 (S3 + Snowpipe)
 
-Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> `5 passed`.
+**Week 3 close-out done 24 Sep** (all committed by Percy): exam re-drill Q2
+pass, Q5 pass on outcomes (tidy: "resumption point" = gaps side; duplicates
+come from half-written files; only Spark reads _spark_metadata). README
+D15 (two jobs + counter-argument), D16 (12-min cut-off, numbers), D17
+(bronze to S3/Snowflake, thick-Spark paragraph), Numbers table extended
+(both completed shares 86.6 % / 73.6 % labelled by stage). Job 2:
+`streaming/window_reliability_batch.py` (`__main__` guard, appName
+window_reliability_batch, imports `window_reliability` from
+silver_arrivals, writes `data/silver/window_reliability` mode overwrite):
+12,546 windows, sums 27,031 / 34,179 match silver exactly, 2 Parquet files
+(vs silver's 801). Mentor predicted 11,500-12,500: just outside. Cosmetics
+done (dead code, unused imports, check_silver appName). Noted for Week 5:
+`dbt/.user.yml` is tracked, should be gitignored.
 
-1. **Re-drill exam Q2 and Q5** (two minutes, no notes): (Q2) why the
-   watermark exists — bounded state FIRST, mechanism second; (Q5) two ledgers
-   — checkpoint prevents gaps, _spark_metadata prevents duplicates, only
-   Spark reads the second. Failure mode first, then mechanism.
-2. **README D15 + D16 are NOT yet written** (checked 23 Sep: README stops at
-   D14). Percy writes both in his words from the NOTES.md lines; mentor
-   reviews. D15 = two-job architecture + counter-argument; D16 = the
-   12-minute cut-off with the 5,043 / 19:03:56 / 19:16:06 numbers and the
-   three Week 9 options.
-3. **Job 2:** `streaming/window_reliability_batch.py` (name TBD with Percy):
-   batch `spark.read.parquet("data/silver/arrivals")` -> `window_reliability`
-   -> print/summary. Predicted: sums n_completed 27,031 / n_total 34,179;
-   window count below 13,602. Hint-level (he has check_silver.py). Optional:
-   write it to `data/silver/window_reliability` Parquet.
-4. Cosmetics from "Code cosmetics still open" above; requirements.txt fix
-   (add pyspark==4.2.0, pytest; UTF-8); git line-ending renormalisation.
-5. **Week 4 = Snowflake** (see "Snowflake status" above and the build plan
-   PDF for the week's exact deliverables): new trial, Standard / AWS /
-   eu-west-2, FIRST write `snowflake/bootstrap.sql` so the environment is
-   code, then reconnect dbt (only the account field changes). Interview
-   framing: "trial expired -> I automated the rebuild."
+**Design decisions 24 Sep:**
+- D17: bronze arrivals -> S3 raw -> Snowpipe -> RAW. Silver tables also to
+  S3 (processed prefix) and read by dbt in Week 5. Percy asked "what is the
+  point of Spark if dbt cleans it": answered as thick-Spark vs thin-Spark,
+  both used together everywhere, line drawn by latency need; overlap =
+  bronze cast twice (Spark + dbt staging), accepted. Week 10 idea: rebuild
+  silver in dbt SQL, check engines agree.
+- Week ordering: S3 buckets (Day 1) and Spark->s3a (Day 2) BEFORE creating
+  the Snowflake trial (Day 3), so the 30-day clock does not start early.
+
+**Day 1 DONE 24 Sep:** buckets `tfl-reliability-raw-percy` and
+`tfl-reliability-processed-percy`, eu-west-2, ACLs disabled, block public
+access on, versioning off, SSE-S3. Created in console as IAM user
+`percy-tfl-user` (Percy was first logged in as root; sent back; root only
+for billing/emergencies; CloudShell not permitted for the IAM user, not
+needed — local PowerShell `aws` CLI is what we use). Write test: `aws s3 cp`
+/ `ls` / `rm` on `_test/hello.txt` all OK, so PutObject/DeleteObject are
+granted. Percy writes the click-by-click in NOTES.md.
+
+**Verified live 24 Sep (hadoop.apache.org r3.5.0 docs, not memory):**
+- Bundled Hadoop in PySpark 4.2.0 is **3.5.0** (checked on Percy's machine
+  via `VersionInfo.getVersion()`). So the connector is
+  `org.apache.hadoop:hadoop-aws:3.5.0`, which pulls the AWS SDK **v2**
+  `bundle` jar transitively via spark.jars.packages (big download, ~500 MB
+  class of jar; first run slow, then cached in .ivy2.5.2).
+- Default `fs.s3a.aws.credentials.provider` chain = TemporaryAWS, SimpleAWS,
+  EnvironmentVariable, IAMInstance. It does NOT read ~/.aws/credentials.
+  To reuse the CLI's profile file set
+  `spark.hadoop.fs.s3a.aws.credentials.provider =
+  software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider`
+  (documented in the 3.5.0 authentication page). Alternative: env vars
+  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (already in default chain).
+
+### NEXT (start here): Week 4 Day 2 — Spark bronze sink to s3a://
+
+Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> 5
+passed; `aws s3 ls` -> two buckets; Docker Kafka up only if streaming live.
+
+Teaching plan (one sub-step per message, prediction before each run,
+hint-level since he has bronze_arrivals.py and check_bronze.py):
+1. **Smoke test, batch, tiny**: new `streaming/s3_smoke.py` (or inline):
+   SparkSession with `spark.jars.packages=org.apache.hadoop:hadoop-aws:3.5.0`
+   + the ProfileCredentialsProvider config + UTC; `spark.range(5).write
+   .mode("overwrite").parquet("s3a://tfl-reliability-raw-percy/_test/range")`
+   then read back `.count()` == 5. Predicted: first run downloads many jars
+   (minutes); then `aws s3 ls s3://tfl-reliability-raw-percy/_test/range/`
+   shows part files + _SUCCESS. Possible Windows gotchas: hadoop.dll already
+   fixed; s3a needs no winutils beyond what is in place. If
+   `NoSuchMethodError`/`ClassNotFound` -> SDK bundle version mismatch, check
+   ivy cache pulled `software.amazon.awssdk:bundle`.
+2. **Copy existing bronze to S3 once (batch)**: `spark.read.parquet
+   ("data/bronze/arrivals").write.partitionBy("date","hour").mode
+   ("overwrite").parquet("s3a://tfl-reliability-raw-percy/arrivals")`.
+   Predicted: read back count == 1,604,977; `aws s3 ls --recursive |
+   Measure-Object -Line` ~ hundreds of objects (774 local files, but a
+   batch write repartitions; count before predicting). Cost: ~40 MB, pence.
+   Design point: this is a backfill; the STREAM (step 3) is the real path.
+3. **Streaming sink**: bronze_arrivals.py `good` sink path ->
+   `s3a://.../arrivals`, checkpoint stays LOCAL for now (`data/checkpoints/
+   bronze_arrivals_s3`, fresh dir so it replays from earliest). Discuss:
+   checkpoint on S3 is possible but S3A rename semantics; local is fine for
+   Week 4, revisit Week 7. Trigger: plan says ~5-min micro-batches for S3
+   (small-files trade-off); use `processingTime="5 minutes"` for the S3
+   sink and record the decision + the compaction TODO (plan step 2: hourly
+   compaction job to 64-256 MB files). Predicted: same count as local after
+   drain. This overwrites step 2's backfill: decide whether step 2 is even
+   needed (mentor lean: skip step 2 if Kafka still has the 8-9 Sep backlog
+   — check `kafka-get-offsets`; retention 30 d from 8 Sep = until 8 Oct).
+4. `_spark_metadata` on S3 + non-Spark readers (Snowpipe) = the Week 7
+   carry-forward becomes live NOW: Snowpipe will list the folder. Decide
+   whether to point Snowpipe at the stream's folder (orphan risk, measured
+   as zero so far) or at a compacted folder. Record as D18.
+5. README: bucket names, region, IAM-not-root, hadoop-aws 3.5.0 +
+   ProfileCredentialsProvider decision, 5-min trigger decision.
+Then Day 3: `snowflake/bootstrap.sql` WRITTEN FIRST (rebuild from
+DW_setup.sql + Week 1 to_know notes: warehouse, DB, RAW/STAGING schemas,
+file format PARQUET, storage integration, external stage, RAW.ARRIVALS
+table, Snowpipe AUTO_INGEST), then new trial (Standard/AWS/eu-west-2), run
+it, storage-integration IAM handshake (plan: budget half a day, external ID
+trips everyone), S3 event notification -> SQS. Day 4: latency measurement +
+reconciliation script (Kafka offsets vs RAW count per hour). Day 5:
+done-when + oral exam.
 
 Carry-over still open: bronze for tfl.line-status and tfl.disruptions
 (simple copies, no watermark); retention.ms on those two topics

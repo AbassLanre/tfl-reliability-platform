@@ -550,3 +550,37 @@ mentor predicted orphans, got none; kill probably landed before the write phase;
 created the window_reliability_batch file as the second job after writing the data/silver/arrivals
 
 it had 12,546 windows and the sum in it (n_total) matches the silver count
+
+Thick spark vs thin spark
+Thin spark only lands raw data, dbt does all of bronze to silver to gold in sql, common with snoflake centered companies
+Thick spark does silver in real time because it needs straming tools (waterark, session windows) that sql can't do. spark lands both raw and silver. dbt builds gold on top of sparks silver and adds test. common where streaming latency is important
+
+this project is thick spark, dbt will have both bronze (for freshness test) and sparks silver
+
+when creating the s3 bucket for the IAM user (percy-tfl-user), followed this
+Bucket name: tfl-reliability-raw-percy
+Region: check the top-right of the page says Europe (London) eu-west-2. If it doesn't, change it there first. The bucket form uses whatever region the console is in.
+Object Ownership: leave ACLs disabled (default).
+Block Public Access: leave all four boxes ticked.
+Bucket Versioning: Disable.
+Default encryption: leave SSE-S3 (default).
+Scroll to the bottom, Create bucket.
+
+did for both raw and processed tfl data
+
+ aws s3 ls:
+2026-09-24 16:37:22 tfl-reliability-processed-percy
+2026-09-24 16:34:35 tfl-reliability-raw-percy
+
+Tested the read and write using:
+echo hello > hello.txt
+aws s3 cp hello.txt s3://tfl-reliability-raw-percy/_test/hello.txt
+aws s3 ls s3://tfl-reliability-raw-percy/_test/
+aws s3 rm s3://tfl-reliability-raw-percy/_test/hello.txt
+
+
+And it worked quite alright
+
+
+
+

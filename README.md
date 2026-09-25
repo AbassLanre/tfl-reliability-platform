@@ -273,6 +273,29 @@ Options for Week 9, not decided yet:
 3. Update output mode is off the table: `session_window` does not support
    it (Spark 4.2.0 docs, checked 23 Sep 2026).
 
+### D17. Bronze is what goes to S3 and Snowflake, not silver
+Week 4 lands bronze arrivals (every field, as received) in S3 and lets
+Snowpipe load it into RAW. Silver tables go to S3 too and dbt reads them
+in Week 5; bronze is the one Snowpipe must load because it is the rebuild
+point.
+
+Why not silver, since silver is the product: in Week 3 I changed the delay
+definition twice and rebuilt silver from bronze each time in minutes. If
+only silver had been in the warehouse, every fix would have meant "the
+warehouse is wrong and I cannot recompute it". Kafka forgets after 30 days
+and a laptop disk is not a warehouse. Bronze in S3 is the copy I can always
+rebuild from. It is also what Week 5's dbt staging expects: RAW that still
+needs casting and renaming.
+
+How Spark and dbt share the work ("thick Spark"): Spark owns what must be
+fresh, reading Kafka and doing the event-time work (watermark, dedupe,
+session windows) so silver exists minutes after the train arrives. dbt owns
+what must be tested and joined: freshness checks, tests, line-status joins,
+hourly and daily marts, built on both RAW (bronze) and Spark's silver. The
+one overlap is that bronze gets cast twice, once in Spark for silver and
+once in dbt staging. I know that and accept it. Week 10 idea: rebuild
+silver's numbers in dbt SQL and check the two engines agree.
+
 ### Known limitations (so far)
 - Session-based collection: every train still on the board when the
   producer stops looks like a lost train, and the last 12 minutes of every
