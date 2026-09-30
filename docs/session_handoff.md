@@ -23,7 +23,7 @@ data-engineering-mentor skill first.
 - Keep NOTES.md entries for every bug/decision (Week 10 needs it). Percy
   keeps NOTES.md live DURING sessions, in his own words — this is working.
 
-## Project status (as of 2026-09-23)
+## Project status (as of 2026-09-30)
 
 - Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 ✅, Day 2 ✅, Day 3 design ✅,
   Day 3 concepts ✅ (17 Sep: state / bounded state / watermark bounds it),
@@ -43,8 +43,10 @@ data-engineering-mentor skill first.
   requirements.txt UTF-8 curated, .gitattributes). **WEEK 4 STARTED:** Day 1
   done (two S3 buckets, IAM write test). **Day 2 DONE 25+28 Sep**: bronze
   stream -> s3a://, 1,604,977 rows in S3, 136 objects (vs 774 local), D18.
-  NEXT = see "NEXT (start here)": Week 4 Day 3 = snowflake/bootstrap.sql
-  first, then new Snowflake trial.
+  **Day 3 part 1 DONE 30 Sep**: snowflake/bootstrap.sql written + committed
+  (0d8fd77), 9 objects, D19 = VARIANT. Trial NOT created yet.
+  NEXT = see "NEXT (start here)": Day 3 part 2 = new trial, run bootstrap,
+  IAM handshake, Snowpipe.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
   and rewrites in his own voice; keep it updated at each week boundary.
@@ -934,37 +936,115 @@ predictions wrong this day (earliest offsets = 0; NPE = first-run-only).
 Saying so plainly still works. He is comfortable with "leave it running and
 come back"; a 40-min drain with a second-terminal watcher is fine.
 
-### NEXT (start here): Week 4 Day 3 — snowflake/bootstrap.sql FIRST, then new trial
+### Week 4 Day 3 part 1 — DONE 2026-09-30: snowflake/bootstrap.sql written (trial NOT yet created)
+
+Commit 0d8fd77. `snowflake/bootstrap.sql` (39 lines, 9 objects, every CREATE
+has IF NOT EXISTS = safe to run twice). DW_setup.sql deleted (contained in
+bootstrap). Written BEFORE the trial so the 30-day clock has not started.
+Syntax for storage integration and pipe verified live on docs.snowflake.com
+(2026-09-30), not memory. Nothing has been RUN yet: Snowflake gets to judge
+the SQL in part 2.
+
+Contents, in file order:
+1. TFL_DEV_WH (XSMALL, AUTO_SUSPEND 60, AUTO_RESUME, INITIALLY_SUSPENDED).
+2. DB TFL_DEV; schemas RAW + STAGING.
+3. FILE FORMAT TFL_DEV.RAW.PARQUET_FORMAT TYPE = PARQUET.
+4. STORAGE INTEGRATION TFL_S3_INT (account-level, no schema prefix):
+   TYPE EXTERNAL_STAGE, S3, ENABLED, STORAGE_AWS_ROLE_ARN =
+   arn:aws:iam::<12 digits>:role/snowflake-tfl-s3-role (role does NOT exist
+   yet — created in AWS in part 2, name must match exactly),
+   STORAGE_ALLOWED_LOCATIONS = s3://tfl-reliability-raw-percy/arrivals/.
+   IF NOT EXISTS matters most here: docs say recreating an integration
+   breaks the hidden link to any stage (external ID regenerates).
+5. STAGE TFL_DEV.RAW.ARRIVALS_STAGE = URL + integration + file format.
+6. TABLE TFL_DEV.RAW.ARRIVALS (raw VARIANT, snowflake_loaded_at TIMESTAMP_NTZ
+   DEFAULT CURRENT_TIMESTAMP()). **D19 (Percy's):** one VARIANT column, "raw
+   as landed", same rule as bronze; dbt staging in Week 5 does the digging
+   and casts. Column renamed from mentor's `loaded_at` after a naming
+   discussion (first draft was `s3_loaded_at`, which would have misdescribed
+   the moment being stamped). snowflake_loaded_at is the Day 4 latency input.
+7. PIPE TFL_DEV.RAW.ARRIVALS_PIPE AUTO_INGEST = TRUE AS COPY INTO
+   RAW.ARRIVALS (raw) FROM (SELECT $1 FROM @stage) PATTERN = '.*[.]parquet'.
+   PATTERN exists because Snowpipe lists the folder and `_spark_metadata/`
+   sits inside `arrivals/`. This is half of D20 (orphans); finish D20 once
+   the pipe runs.
+NOT in the file on purpose: ALTER USER SET RSA_PUBLIC_KEY (public repo; run
+by hand, note in README). Keys still at C:\Users\user\.snowflake\keys\.
+
+Housekeeping flag: NOTES.md now contains the 12-digit AWS account number in
+plain text and the repo is public. Not a secret, but Percy should decide
+whether to keep it there (mentor lean: replace with "<in .env>").
+
+Errors Percy made and fixed today (the hint-level record): file format
+first written as `CREATE FILE FORMAT TFL_DEV TYPE = PARQUET` (no object
+name, no IF NOT EXISTS, no semicolon) — fixed after one explicit review;
+stage `FILE_FORMAT = FORMAT` (bare word) — fixed to the three-part name.
+Everything else right first time from hints.
+
+**Teaching notes (30 Sep):**
+- He pushed back once: "check my code, not sure I understood from your
+  vague analogy". The building/room/label analogy for three-part names did
+  NOT land. What worked: show the wrong line next to the right line, list
+  what is missing most-important-first, no analogy.
+- Two-gap / three-gap fill-in statements (full SQL shown, `____` where he
+  must copy a value from a numbered earlier line) worked every time. Tables
+  mapping "gap -> which line to copy from" were the right hint shape.
+- Mentor line-number predictions were wrong twice (12 vs 13 lines; stage on
+  20 vs 19). Said so plainly. Count before predicting.
+- He decides quickly and with a reason when given a two-option table with
+  an honest lean (D19 in one sentence). Keep doing that for D20.
+
+### NEXT (start here): Week 4 Day 3 part 2 — new trial, run bootstrap, IAM handshake
 
 Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> 5
-passed; `aws s3 ls s3://tfl-reliability-raw-percy/arrivals/` -> PRE
-_spark_metadata/, date=2026-09-08/, date=2026-09-09/.
+passed; `git log --oneline -1` -> 0d8fd77 or later; `aws s3 ls
+s3://tfl-reliability-raw-percy/arrivals/` -> 3 PRE lines.
 
-Order (the 30-day clock starts when the trial is created, so write the
-script before creating the account):
-1. Write `snowflake/bootstrap.sql` from DW_setup.sql + Week 1 to_know notes:
-   warehouse TFL_DEV_WH (X-Small, AUTO_SUSPEND=60, AUTO_RESUME,
-   INITIALLY_SUSPENDED), DB TFL_DEV, schemas RAW + STAGING, file format
-   PARQUET, storage integration -> external stage on
-   s3://tfl-reliability-raw-percy/arrivals/, table RAW.ARRIVALS (VARIANT
-   or explicit columns — decide, record), Snowpipe AUTO_INGEST=TRUE,
-   ALTER USER SET RSA_PUBLIC_KEY. One idea per sub-step; hints since he has
-   Week 1 patterns.
-2. New trial: Standard / AWS / eu-west-2. Update account field in
-   config.toml and dbt/profiles.yml only. Run bootstrap.sql top to bottom.
-3. Storage-integration IAM handshake (plan budgets half a day; external ID
-   trips everyone). Verify with `LIST @stage`.
-4. S3 event notification -> SQS (from `SHOW PIPES` notification_channel).
-   First load: `ALTER PIPE ... REFRESH` for the backfill, then prove
-   AUTO_INGEST with one more small stream run.
-5. D19: Snowpipe reads the folder listing, not `_spark_metadata`. Orphan
-   risk measured zero so far; decide and record.
-Day 4: latency measurement + reconciliation (Kafka offsets vs RAW count per
-hour). Day 5: done-when + oral exam.
+This session is mostly CLICKING, not typing. One click-step per message,
+with "what you should now see" as the prediction. The 30-day clock starts at
+step 1.
+1. New Snowflake trial: Standard / AWS / **eu-west-2 (Europe London)**.
+   Note the new account identifier. Update ONLY the account field in
+   ~/.snowflake/config.toml and dbt/profiles.yml (RSA keys unchanged).
+2. In a Snowsight worksheet as ACCOUNTADMIN, run bootstrap.sql top to
+   bottom. Predicted: 9 "successfully created" + the final SELECT showing
+   TFL_DEV_WH / TFL_DEV / RAW. Expected failure to watch for: CREATE
+   STORAGE INTEGRATION needs ACCOUNTADMIN (docs). If the pipe errors on the
+   stage "not found", the integration/stage step failed first — read
+   top-down. Then run it a SECOND time: predicted zero errors, nothing
+   recreated (the safe-to-run-twice proof; interview line).
+3. `DESC INTEGRATION TFL_S3_INT;` -> copy STORAGE_AWS_IAM_USER_ARN and
+   STORAGE_AWS_EXTERNAL_ID. These are Snowflake's half of the handshake.
+4. AWS console (IAM user, not root): create role `snowflake-tfl-s3-role`
+   (exact name from bootstrap line 16) with trust policy = that IAM user
+   ARN + sts:ExternalId = that external ID; permissions policy = s3:GetObject,
+   s3:GetObjectVersion, s3:ListBucket on the raw bucket / arrivals prefix.
+   Plan budgets half a day; external ID trips everyone. Verify with
+   `LIST @TFL_DEV.RAW.ARRIVALS_STAGE;` -> predicted 136 rows minus
+   _spark_metadata entries (count on S3 first before predicting!).
+5. `ALTER USER <name> SET RSA_PUBLIC_KEY='...'` by hand (from the .pub file);
+   `snow sql -q "select 1"` and `dbt debug` both green.
+6. `SHOW PIPES;` -> copy notification_channel (an SQS ARN). S3 console:
+   bucket -> Properties -> Event notifications -> new, prefix `arrivals/`,
+   suffix `.parquet`, All object create events, destination = that SQS ARN.
+7. Backfill: `ALTER PIPE TFL_DEV.RAW.ARRIVALS_PIPE REFRESH;` then poll
+   `SELECT COUNT(*) FROM TFL_DEV.RAW.ARRIVALS;` -> predicted **1,604,977**
+   (== S3 == local bronze). Also `SELECT raw:line_id::string, ... LIMIT 5`
+   to prove the VARIANT is queryable.
+8. Prove AUTO_INGEST: one short producer + bronze_arrivals run (5-min
+   trigger, so wait one batch), then count rises WITHOUT a REFRESH.
+9. D20: Snowpipe reads the listing, not `_spark_metadata`; PATTERN excludes
+   the ledger folder; orphan risk measured zero so far (801 == 801 on
+   silver, no orphans on bronze S3 either). Decide: accept + document, or
+   dedupe downstream in dbt. Record in NOTES.md and README.
+Day 4: latency (snowflake_loaded_at − ingested_at per hour) + reconciliation
+(Kafka offsets vs RAW count per hour). Day 5: done-when + oral exam.
 
 Carry-over still open: bronze for tfl.line-status and tfl.disruptions;
 retention.ms on those two topics unconfirmed; check_bronze.py tidy;
-small-files/compaction (Week 7); per-key gap distribution (needs lag).
+small-files/compaction (Week 7); per-key gap distribution (needs lag);
+README section for Week 4 Days 1-3 (buckets, IAM-not-root, hadoop-aws,
+D18, D19, bootstrap-before-trial story).
 
 ### Reference — Day 2 plan as written 24 Sep (done 25/28 Sep, kept for history)
 

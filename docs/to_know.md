@@ -536,3 +536,55 @@ matters on S3 and for Snowpipe; drain time is the side effect.
 
 **Next:** Week 4 Day 3, snowflake/bootstrap.sql written BEFORE the new
 trial, then storage integration, external stage, Snowpipe AUTO_INGEST.
+(Script done 30 Sep, below.)
+
+## Week 4 Day 3 part 1 — snowflake/bootstrap.sql, written before the trial (30 Sep 2026)
+
+**Built:** `snowflake/bootstrap.sql`, 39 lines, nine objects, every CREATE
+with IF NOT EXISTS so the file is safe to run twice: warehouse, database,
+RAW + STAGING schemas, Parquet file format, storage integration TFL_S3_INT
+(role ARN `snowflake-tfl-s3-role`, allowed location = the arrivals/ prefix
+only), external stage ARRIVALS_STAGE, table RAW.ARRIVALS (raw VARIANT +
+snowflake_loaded_at DEFAULT CURRENT_TIMESTAMP()), pipe ARRIVALS_PIPE with
+AUTO_INGEST and `PATTERN = '.*[.]parquet'`. DW_setup.sql deleted. Committed
+0d8fd77. Nothing run yet: the trial does not exist, on purpose.
+
+**Decided (D19, mine):** RAW.ARRIVALS is one VARIANT column. Raw as landed,
+the same rule as bronze; the digging-out and casting is dbt's job in Week 5.
+Trade-off I know: every RAW query is `raw:line_id::string`, not `line_id`.
+
+**Learned:**
+- Write the rebuild script BEFORE creating the trial, because the 30-day
+  clock starts at account creation, not at first use.
+- Snowflake names have three parts: database.schema.object. A schema stops
+  at two. An integration has no prefix at all, it belongs to the account.
+- A storage integration is Snowflake's half of a handshake: I give it an
+  AWS role ARN; it gives back an IAM user ARN + external ID that go into
+  the role's trust policy. Recreating the integration regenerates the
+  external ID and silently breaks every stage on it, so IF NOT EXISTS is
+  not cosmetic there.
+- A stage joins three things I made separately: where the files are (URL),
+  the key (integration), how to read them (file format).
+- A pipe is a saved COPY INTO plus a switch. `$1` on Parquet is the whole
+  row as one blob, which is exactly what a VARIANT column wants.
+- Snowpipe lists the folder; it does not read `_spark_metadata`. The
+  PATTERN line keeps Spark's ledger files out of the load. The orphan
+  question from Week 3 is now live, not theoretical (D20 pending).
+- My two errors today were both about names: an object with no name, and a
+  bare `FORMAT` instead of the three-part name. Names are the whole game in
+  this file.
+
+**Interview sentences:**
+- "The trial expired, so I wrote the environment as code before creating
+  the next one. Nine objects, idempotent, one file, run twice to prove it."
+- "RAW is a VARIANT column because raw means as landed. The casting lives
+  in dbt staging where it is tested, not in the load step where it is not."
+- "Snowpipe reads the S3 listing, not Spark's commit log, so I filter to
+  `.parquet` and I have to decide what an orphan file from a killed batch
+  means downstream. That is the honest motivation for an open table format."
+
+**Next:** new trial (Standard / AWS / eu-west-2), run bootstrap.sql twice,
+DESC INTEGRATION, build the IAM role with the external ID, LIST @stage, SQS
+event notification, ALTER PIPE REFRESH -> count 1,604,977, then prove
+AUTO_INGEST with a live run. D20 on orphans.
+

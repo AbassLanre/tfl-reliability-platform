@@ -617,7 +617,7 @@ ran the bronze_arrival file to write to aws and test the sink, in one termnal i 
 
 ran the count and got 1604977, meaning that it matched the bronze from our local (Kafka → Spark → S3)
 
-AWD account number printed out: 388096320305
+AWD account number printed out: ********20305
 
 
 Options
