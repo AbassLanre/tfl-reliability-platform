@@ -491,4 +491,48 @@ the 30-day clock does not start before S3 works.
 
 **Next:** Week 4 Day 2, Spark bronze sink to s3a:// (smoke test with
 spark.range(5) first, then the stream, 5-minute trigger for S3, checkpoint
-local for now).
+local for now). (Done 25/28 Sep, below.)
+
+## Week 4 Day 2 — Spark bronze stream to S3 (25 + 28 Sep 2026)
+
+**Built:** `s3_smoke.py` (range(5) -> S3 -> count 5, `aws s3 ls` as the
+independent witness: _SUCCESS + one part file per local[2] worker).
+`bronze_arrivals.py` now writes `good` to
+`s3a://tfl-reliability-raw-percy/arrivals` with a fresh local checkpoint,
+5-minute trigger, 200k offsets per batch; builder loads two adapters
+(Kafka + hadoop-aws 3.5.0) and tells s3a to use the same credentials file
+as the `aws` CLI. `check_bronze_s3.py` counts S3.
+
+**Decided:** replay from Kafka (the real pipeline) instead of copying local
+Parquet up. D18: 5-min trigger + 200k offsets for S3, because file size
+matters on S3 and for Snowpipe; drain time is the side effect.
+
+**Learned / broke:**
+- Kafka offsets never reset. Earliest offsets summed to exactly 1,547,526,
+  the 26 Aug backlog Kafka deleted on 8 Sep. Page numbers stay after pages
+  are torn out. Mentor predicted 0; the sum proved nothing since 8 Sep is
+  gone. Latest minus earliest = 1,604,979 = the replay size.
+- A reused checkpoint that says "all done" makes a new sink write nothing.
+  New destination = new checkpoint.
+- 81 batches x 5 minutes = 6 h 45 min. Raising offsets-per-batch to 200k
+  gave 9 batches, ~40 minutes, AND fewer files: 136 objects in S3 vs 774
+  local Parquet files for the same 1,604,977 rows.
+- hadoop-aws drags a 600 MB AWS SDK jar; every start prints a few
+  NullPointerException heartbeat blocks, then works. Noise, recorded,
+  proven harmless by the count.
+- Count in S3 == local bronze == 1,604,977. Same code, two config lines.
+
+**Interview sentences:**
+- "I moved bronze from local disk to S3 by changing the sink path and the
+  checkpoint. The transform code did not change; the count matched to the
+  row."
+- "Kafka offsets are page numbers, not counts. My earliest offsets told me
+  exactly how much retention had deleted, and that nothing newer was lost."
+- "On object storage I trade latency for file size: 5-minute batches and
+  200k rows per batch cut the file count by six times. Compaction is the
+  next step, not the first."
+- "I verify with a tool that did not do the writing: aws s3 ls after Spark,
+  Spark count after the stream, checkpoint commits during it."
+
+**Next:** Week 4 Day 3, snowflake/bootstrap.sql written BEFORE the new
+trial, then storage integration, external stage, Snowpipe AUTO_INGEST.

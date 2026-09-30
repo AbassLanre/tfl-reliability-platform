@@ -581,6 +581,38 @@ aws s3 rm s3://tfl-reliability-raw-percy/_test/hello.txt
 
 And it worked quite alright
 
+spark needs two things to save to s3 (instead of our local device):
+Adapter - plugun called hadoop-aws
+my keys
 
+hadoop-aws added a 600 MB jar
+harmless: write + read-back worked
 
+There are two ways to fill S3 with 1.6 million bronze rows:
 
+Road A, the photocopier. Copy the Parquet files already on laptop up to S3.
+Road B, the replay. Point your existing bronze stream at S3 and let it re-read everything from Kafka, starting from the beginning.
+
+offsets never reset; earliest offset = how many messages have been deleted from that partition.
+
+when i checked kafka history for the data stored by checking its earliest data, using: docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic tfl.arrivals --time -2 i got a total of 1,547,526
+
+But that was the data before AUG 26 that we deleted from our data folder, kafka still stored the history and after that when i ran: 
+docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic tfl.arrivals --time -1
+
+i got 3,152,505 meaning 1,604,979 which i still have as my current data was added to it
+
+Now to teach bronze_arrivals (it got the data from tfl and saved through kafka) to talk to s3
+
+Set 5 minutes now and also raise maxOffsetsPerTrigger so the drain finishes in a sane number of batches
+
+it'd take 6 hours 45 minutes 81 batches x 5 minutes
+
+because of less time to drain, 5 minutes plus increasing maxOffsetsPerTrigger will reduce wait time to drain, and as the offset trigger increases, the number of files also reduces as there are more rows to attach to a single trigger
+
+basically:
+5-min trigger + 200k offsets per batch for S3; reason = file size, side effect = drain time.
+
+ran the bronze_arrival file to write to aws and test the sink, in one termnal i was running the bronze arrival file and in the other i was watching the commit and aws to see update on them
+
+ran the count and got 1604977, meaning that it matched the bronze from our local (Kafka → Spark → S3)

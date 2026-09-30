@@ -41,8 +41,10 @@ data-engineering-mentor skill first.
   24 Sep: Week 3 paperwork closed (exam re-drill passed, README D15/D16/D17,
   job 2 `streaming/window_reliability_batch.py` 12,546 windows, cosmetics,
   requirements.txt UTF-8 curated, .gitattributes). **WEEK 4 STARTED:** Day 1
-  done (two S3 buckets, IAM write test). NEXT = see "NEXT (start here)":
-  Week 4 Day 2 = Spark bronze sink to s3a://.
+  done (two S3 buckets, IAM write test). **Day 2 DONE 25+28 Sep**: bronze
+  stream -> s3a://, 1,604,977 rows in S3, 136 objects (vs 774 local), D18.
+  NEXT = see "NEXT (start here)": Week 4 Day 3 = snowflake/bootstrap.sql
+  first, then new Snowflake trial.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
   and rewrites in his own voice; keep it updated at each week boundary.
@@ -869,7 +871,102 @@ granted. Percy writes the click-by-click in NOTES.md.
   (documented in the 3.5.0 authentication page). Alternative: env vars
   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (already in default chain).
 
-### NEXT (start here): Week 4 Day 2 — Spark bronze sink to s3a://
+### Week 4 Day 2 — DONE 2026-09-25 (smoke) + 2026-09-28 (stream)
+
+**Built:** `streaming/s3_smoke.py` (builder with hadoop-aws + s3a creds;
+range(5) -> S3 -> count 5; `aws s3 ls` showed _SUCCESS + 2 part files, one
+per local[2] worker). `streaming/check_bronze_s3.py` (same builder, counts
+`s3a://tfl-reliability-raw-percy/arrivals`). `bronze_arrivals.py` changed:
+builder packages = kafka connector + `org.apache.hadoop:hadoop-aws:3.5.0`
+(comma-separated, no spaces) + `spark.hadoop.fs.s3a.aws.credentials.provider
+= software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider` +
+`spark.hadoop.fs.s3a.endpoint.region = eu-west-2` (region line is mentor's
+belt-and-braces, not verified as required); good sink path ->
+`s3a://tfl-reliability-raw-percy/arrivals`, checkpoint -> FRESH
+`data/checkpoints/bronze_arrivals_s3` (old one said "all 81 done" so reuse
+would write nothing), trigger `processingTime="5 minutes"`,
+`maxOffsetsPerTrigger` 20000 -> 200000. Quarantine sink untouched (still
+local, old checkpoint, sat idle). Percy chose replay-from-Kafka (Road B)
+over copying local Parquet (Road A): it is the real pipeline.
+
+**Verified live on Percy's machine (not memory):** hadoop-aws 3.5.0 pulls
+`software.amazon.awssdk:bundle:2.35.4` + analyticsaccelerator-s3 1.3.1 +
+wildfly-openssl 2.2.5.Final = 4 artifacts, 674 MB, 48 s first time, then
+"0 artifacts copied, 4 already retrieved".
+
+**Numbers (prediction -> actual):**
+- Kafka earliest offsets: mentor predicted all 0. WRONG. Sum = 1,547,526 =
+  exactly the deleted 26 Aug backlog. Lesson: offsets never reset; earliest
+  offset = how many messages have been deleted from that partition. Latest
+  offsets sum 3,152,505 (predicted, matched), so replay = 1,604,979.
+- 1,604,979 / 200,000 -> 9 batches (predicted 9): commits 0-8, first at
+  16:23, then every 5 min on the dot, done 17:00 (~40 min).
+- `check_bronze_s3` count **1,604,977** == local bronze. Done-when met.
+- Objects in S3 `arrivals/` prefix: **136** (predicted 100-200) vs 774 local
+  Parquet files for the same rows. D18's file-count claim is measured.
+- 5-min x 81 batches would have been 6 h 45 min (Percy did the sum, chose
+  bigger batches, spotted the file-count benefit unprompted).
+
+**D18 (Percy's, in NOTES.md, to go in README):** S3 sink uses 5-minute
+trigger + 200k offsets/batch. Reason = file size (fewer, bigger Parquet
+files for Snowpipe and for cost); side effect = sane backfill time.
+Compaction to 64-256 MB files still a Week 7 TODO.
+
+**Known noise, recorded:** every start with hadoop-aws prints ~4 blocks of
+`ERROR Inbox ... NullPointerException ... BlockManagerId.executorId()` +
+`WARN Executor: Issue communicating with driver in heartbeater`, 10 s
+apart, then stops. Mentor's belief (unverified): executor heartbeats before
+the 600 MB bundle jar finishes copying. Harmless: writes and read-backs
+all correct. Revisit only if a write fails.
+
+**Still open from Day 2 plan:** README section (bucket names, region,
+IAM-not-root, hadoop-aws 3.5.0 + ProfileCredentialsProvider, D18 with
+774 -> 136); `_spark_metadata` on S3 vs Snowpipe listing the folder
+(orphan risk) = decide as D19 when Snowpipe is pointed at the prefix;
+stale comment on the `path` line of the good sink ("relative to where you
+run the script"); `_test/range` prefix in the raw bucket can be deleted.
+
+**Teaching notes (25 + 28 Sep):** hint-level worked for every edit (builder,
+sink, trigger) — he pasted each block for review and every one was correct
+first time. The arithmetic-as-hint pattern (81 x 5 min = ?) got him to the
+right decision AND the hidden benefit without being told. Two mentor
+predictions wrong this day (earliest offsets = 0; NPE = first-run-only).
+Saying so plainly still works. He is comfortable with "leave it running and
+come back"; a 40-min drain with a second-terminal watcher is fine.
+
+### NEXT (start here): Week 4 Day 3 — snowflake/bootstrap.sql FIRST, then new trial
+
+Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> 5
+passed; `aws s3 ls s3://tfl-reliability-raw-percy/arrivals/` -> PRE
+_spark_metadata/, date=2026-09-08/, date=2026-09-09/.
+
+Order (the 30-day clock starts when the trial is created, so write the
+script before creating the account):
+1. Write `snowflake/bootstrap.sql` from DW_setup.sql + Week 1 to_know notes:
+   warehouse TFL_DEV_WH (X-Small, AUTO_SUSPEND=60, AUTO_RESUME,
+   INITIALLY_SUSPENDED), DB TFL_DEV, schemas RAW + STAGING, file format
+   PARQUET, storage integration -> external stage on
+   s3://tfl-reliability-raw-percy/arrivals/, table RAW.ARRIVALS (VARIANT
+   or explicit columns — decide, record), Snowpipe AUTO_INGEST=TRUE,
+   ALTER USER SET RSA_PUBLIC_KEY. One idea per sub-step; hints since he has
+   Week 1 patterns.
+2. New trial: Standard / AWS / eu-west-2. Update account field in
+   config.toml and dbt/profiles.yml only. Run bootstrap.sql top to bottom.
+3. Storage-integration IAM handshake (plan budgets half a day; external ID
+   trips everyone). Verify with `LIST @stage`.
+4. S3 event notification -> SQS (from `SHOW PIPES` notification_channel).
+   First load: `ALTER PIPE ... REFRESH` for the backfill, then prove
+   AUTO_INGEST with one more small stream run.
+5. D19: Snowpipe reads the folder listing, not `_spark_metadata`. Orphan
+   risk measured zero so far; decide and record.
+Day 4: latency measurement + reconciliation (Kafka offsets vs RAW count per
+hour). Day 5: done-when + oral exam.
+
+Carry-over still open: bronze for tfl.line-status and tfl.disruptions;
+retention.ms on those two topics unconfirmed; check_bronze.py tidy;
+small-files/compaction (Week 7); per-key gap distribution (needs lag).
+
+### Reference — Day 2 plan as written 24 Sep (done 25/28 Sep, kept for history)
 
 Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> 5
 passed; `aws s3 ls` -> two buckets; Docker Kafka up only if streaming live.

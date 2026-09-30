@@ -14,7 +14,9 @@ spark = (
     SparkSession.builder
     .appName("bronze_arrivals")
     .master("local[2]")
-    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.2.0")
+    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.2.0,org.apache.hadoop:hadoop-aws:3.5.0")
+    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider") # "use aws keys"
+    .config("spark.hadoop.fs.s3a.endpoint.region", "eu-west-2")
     .config("spark.sql.session.timeZone", "UTC")
     .getOrCreate()
 )
@@ -24,7 +26,7 @@ df = (spark.readStream.format("kafka")
     .option("kafka.bootstrap.servers", "localhost:9092")
     .option("subscribe", "tfl.arrivals")
     .option("startingOffsets", "earliest")                # streaming DEFAULT is "latest" = only new messages from now on; we want the backlog
-    .option("maxOffsetsPerTrigger", "20000")              # cap per micro-batch: 20k rows per trigger, not 1.5M in one gulp
+    .option("maxOffsetsPerTrigger", "200000")              # cap per micro-batch: 200k rows per trigger, not 1.6M in one gulp
     .load()
 )
 
@@ -66,18 +68,18 @@ good =( parsed
        .withColumn("date", to_date(col("ingested_at")))
        .withColumn("hour", hour(col("ingested_at")))
        ) # ~ is NOT; expand the struct only for good rows
-good.printSchema()
+# good.printSchema()
 
 bad  = parsed.filter(is_bad).select("value_str")          # keep the raw text, that's what you'll debug from
 
 good_q = (
     good.writeStream.queryName("bronze_good")
     .format("parquet")                                                   # WAS "console". Now: files on disk
-    .option("path", "data/bronze/arrivals")                              # the shelves. Relative to where you run the script, so run from repo root
-    .option("checkpointLocation", "data/checkpoints/bronze_arrivals")    # the clipboard: which Kafka offsets are finished. One per query, never shared
+    .option("path", "s3a://tfl-reliability-raw-percy/arrivals")
+    .option("checkpointLocation", "data/checkpoints/bronze_arrivals_s3")    # the clipboard: which Kafka offsets are finished. One per query, never shared
     .partitionBy("date", "hour")                                         # one folder per value: date=2026-09-08/hour=19/
     .outputMode("append")                                                # unchanged (also the only mode the file sink supports)
-    .trigger(processingTime="10 seconds")                                # unchanged
+    .trigger(processingTime="5 minutes")                                # unchanged
     .start()
 )
 bad_q  = (
