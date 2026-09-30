@@ -616,3 +616,13 @@ basically:
 ran the bronze_arrival file to write to aws and test the sink, in one termnal i was running the bronze arrival file and in the other i was watching the commit and aws to see update on them
 
 ran the count and got 1604977, meaning that it matched the bronze from our local (Kafka → Spark → S3)
+
+AWD account number printed out: 388096320305
+
+
+Options
+A. One VARIANT column:	1 column holding each whole row as a JSON-like blob, Never breaks if a column is added or renamed upstream; 1 line of SQL but Every query has to dig fields out of the blob: raw:line_id::string
+B. 22 explicit columns	22 named, typed columns, like a normal table, Plain SQL, dbt sees real columns straight away but, 22 lines to type; any schema change upstream breaks the load
+
+A, because we want it raw as it is, since i want to start from scratch as landed
+
