@@ -3,8 +3,8 @@ tfl_reliability:
   outputs:
     dev:
       type: snowflake
-      account: WBGCTLM-QP79037
-      user: PERCYABS
+      account: BWQDSUN-PF94891
+      user: PERCYABS1
       private_key_path: "C:/Users/user/.snowflake/keys/snowflake_key.p8"
       role: ACCOUNTADMIN   
       database: TFL_DEV

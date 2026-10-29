@@ -626,3 +626,25 @@ B. 22 explicit columns	22 named, typed columns, like a normal table, Plain SQL, 
 
 A, because we want it raw as it is, since i want to start from scratch as landed
 
+a pipe with AUTO_INGEST validates bucket access when it’s created, so the AWS role must exist first; integration and stage don’t check
+
+The first run of bootstrap failed because the snoflake sends its own external ID to AWS but we had not created a tfl role that accepts external ID, created the role on aws and added the external ID to the role so it can be given READ access
+
+Ran it again, and since it is idempotent, nothing created earlier gets created again it succesfully ran the bootstrap
+
+Snowpipe REFRESH has a hard 7-day window; older files need a plain COPY INTO backfill
+
+set tfl as default snowflake project
+snow connection set-default tfl
+
+Now chwecking in again, starting from snowsight, the current amount is 1604977
+I started the kafka ingestion once again, and got 3172482  messages
+
+earlier offset was 3,152,505 meaning 19,977 messages were added
+
+19,977 new Kafka messages became 19,977 new RAW rows with no manual step; auto-ingest proven on 28 Oct
+
+“Snowpipe reads the listing, not Spark’s commit log, so I measured the orphan rate (zero over three kill drills) and put a uniqueness test on the raw table so a half-written file would show up as a failed test, not as a wrong number on the dashboard
+
+TIMESTAMP_NTZ stores wall-clock in the account’s timezone and forgets the zone; the account default is Los Angeles; pinned the account to UTC, same decision as spark.sql.session.timeZone=UTC in Week 3
+
