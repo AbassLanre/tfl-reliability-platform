@@ -648,3 +648,5 @@ earlier offset was 3,152,505 meaning 19,977 messages were added
 
 TIMESTAMP_NTZ stores wall-clock in the account’s timezone and forgets the zone; the account default is Los Angeles; pinned the account to UTC, same decision as spark.sql.session.timeZone=UTC in Week 3
 
+reconciliation only works inside Kafka’s retention, so run it after every session, not weeks later:
+docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic tfl.arrivals --time -2

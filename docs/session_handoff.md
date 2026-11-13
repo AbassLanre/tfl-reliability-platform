@@ -23,7 +23,7 @@ data-engineering-mentor skill first.
 - Keep NOTES.md entries for every bug/decision (Week 10 needs it). Percy
   keeps NOTES.md live DURING sessions, in his own words — this is working.
 
-## Project status (as of 2026-09-30)
+## Project status (as of 2026-11-13)
 
 - Week 0 ✅  Week 1 ✅  Week 2 ✅  Week 3: Day 1 ✅, Day 2 ✅, Day 3 design ✅,
   Day 3 concepts ✅ (17 Sep: state / bounded state / watermark bounds it),
@@ -45,8 +45,13 @@ data-engineering-mentor skill first.
   stream -> s3a://, 1,604,977 rows in S3, 136 objects (vs 774 local), D18.
   **Day 3 part 1 DONE 30 Sep**: snowflake/bootstrap.sql written + committed
   (0d8fd77), 9 objects, D19 = VARIANT. Trial NOT created yet.
-  NEXT = see "NEXT (start here)": Day 3 part 2 = new trial, run bootstrap,
-  IAM handshake, Snowpipe.
+  **Day 3 part 2 + Day 4 DONE 16 Oct / 28 Oct / 13 Nov** (three short
+  sessions, school resumed): new Snowflake STUDENT account (120 days), bootstrap
+  run, IAM handshake, S3 event -> Snowpipe, backlog 1,604,977 via COPY INTO,
+  AUTO_INGEST proven (+19,977 = RAW 1,624,954), D20 = B, account pinned to
+  UTC, latency measured, `snowflake/checks.sql`, `scripts/reconcile.py`.
+  **WEEK 4 BUILD DONE; done-when met.** Oral exam asked 13 Nov (see NEXT).
+  NEXT = see "NEXT (start here)": Week 5 dbt.
 - README.md is no longer a stub (16 Sep): mentor-drafted decision log
   D1–D14 + numbers + local run steps, TODOs for Weeks 4–10. Percy reviews
   and rewrites in his own voice; keep it updated at each week boundary.
@@ -192,6 +197,12 @@ data-engineering-mentor skill first.
 
 ## Snowflake status (IMPORTANT)
 
+- **UPDATE 16 Oct 2026: NEW ACCOUNT LIVE.** Student trial, **120 days**
+  from 16 Oct (ends ~13 Feb 2027). Account `BWQDSUN-PF94891`, user
+  `PERCYABS1`, AWS_EU_WEST_2, account TIMEZONE = UTC (set 28 Oct, line 1 of
+  bootstrap.sql). snow CLI connection is named `tfl` and is the default;
+  `dbt debug` green. Key files: snowflake_key.p8 / snowflake_key.pub in
+  C:\Users\user\.snowflake\keys\. Everything below this line is history.
 - The $400 trial EXPIRED (~mid-Aug). Decision made with mentor: do NOT
   create a new account until Week 4 starts (Weeks 2-3 are all-local; don't
   burn the 30-day clock). When Week 4 starts: new trial, Standard / AWS /
@@ -994,7 +1005,128 @@ Everything else right first time from hints.
 - He decides quickly and with a reason when given a two-option table with
   an honest lean (D19 in one sentence). Keep doing that for D20.
 
-### NEXT (start here): Week 4 Day 3 part 2 — new trial, run bootstrap, IAM handshake
+### Week 4 Day 3 part 2 + Day 4 — DONE 16 Oct, 28 Oct, 13 Nov 2026
+
+Files: `snowflake/bootstrap.sql` (+ `ALTER ACCOUNT SET TIMEZONE = 'UTC';` as
+line 1), `snowflake/checks.sql` (6 read-only health checks),
+`scripts/reconcile.py`, `TASKS.md` (mentor-kept checklist, repo root).
+
+**Verified live (docs.snowflake.com, 16 Oct):** read-only S3 policy needs FOUR
+permissions (GetObject, GetObjectVersion, ListBucket, **GetBucketLocation**);
+trust policy = Snowflake IAM user ARN + sts:ExternalId; `ALTER PIPE REFRESH`
+only queues files staged in the **last 7 days** (hard maximum).
+**Verified in Percy's .venv (13 Nov):** confluent-kafka 2.15.0
+`offsets_for_times` returns -1 when the timestamp is past the last message;
+snowflake-connector 4.6.0 `connect(connection_name="tfl")` reads config.toml.
+
+**What happened, in order (prediction -> actual):**
+- bootstrap run 1: mentor predicted 9 created. WRONG: 8 created, the pipe
+  failed with "Error assuming AWS_ROLE". CREATE PIPE with AUTO_INGEST tests
+  bucket access at creation; integration and stage do not. The error text
+  handed over Snowflake's IAM user ARN for free.
+- AWS: policy `snowflake-tfl-s3-read` (read-only, arrivals/ prefix), role
+  `snowflake-tfl-s3-role`, trust narrowed to the one IAM user + external ID.
+- `SYSTEM$VALIDATE_STORAGE_INTEGRATION`: LIST success; WRITE/DELETE denied
+  (correct, read-only); READ "file not found". Mentor predicted READ success:
+  WRONG, the function reads the file name you pass and it did not exist.
+- `LIST @stage` = 136 == `aws s3 ls` 136. bootstrap run 2: 8 "already
+  exists" + pipe created. Better story than "ran twice, nothing happened".
+- S3 event notification `snowpipe-arrivals` (prefix arrivals/, suffix
+  .parquet, all object create) -> the pipe's SQS ARN.
+- Ledger files: mentor predicted 9, actual **10** (126 parquet + 10
+  _spark_metadata = 136).
+- `ALTER PIPE REFRESH` loaded NOTHING (files were 18+ days old). Mentor's
+  plan step was wrong for the data's age. Fix: plain `COPY INTO` with the
+  same SQL as the pipe: 126 files, **1,604,977 rows**; second COPY = "0 files
+  processed" (per-file idempotence shown live).
+- snow CLI: "Connection default is not configured" = the connection is named
+  `tfl`; `snow connection set-default tfl`.
+- **AUTO_INGEST proof (28 Oct):** 3-minute producer run = **19,977** new
+  messages (latest offsets 3,152,505 -> 3,172,482); one bronze batch to S3;
+  RAW went 1,604,977 -> **1,624,954** with no manual step. Percy first
+  subtracted the RAW count from the Kafka offset (1,567,505): offsets only
+  compare with offsets. Corrected, he has it in NOTES.md.
+- **D20 = B (Percy's):** document the orphan risk AND add a dbt `unique`
+  test on a row fingerprint in Week 5. Detect, do not silently dedupe.
+- **Clock trap:** account default timezone was America/Los_Angeles, so
+  `snowflake_loaded_at` (TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()) was LA
+  wall-clock, 7 h behind UTC `ingested_at`. Fixed: ALTER ACCOUNT SET
+  TIMEZONE='UTC' + ONE-TIME UPDATE converting the existing 1,624,954 stamps
+  (must never be re-run; it is in NOTES.md, not in any .sql file).
+- **Latency (28 Oct rows):** n 19,977 | min 512 s | p50 584 | p95 **672** |
+  max 675; all rows in one Snowpipe load. Mentor predicted p50 180-300:
+  WRONG. The producer ran first and the stream was started afterwards, so
+  the number includes test-order wait. Honest figure needs producer and
+  stream running together (Week 9 sessions). Recorded with that caveat.
+- **Reconciliation (13 Nov):** earliest offsets now sum to 3,152,505: Kafka
+  deleted the 8-9 Sep data (30-day retention), mentor prediction RIGHT. Kafka
+  holds only the 28 Oct messages until ~27 Nov. `python scripts/reconcile.py
+  2026-10-28` -> 16:00 hour, kafka 19,977 == snowflake 19,977, OK, exit 0.
+  `... 2026-09-09` -> kafka 0 vs snowflake 356,671 / 501,680 / 467,834 /
+  126,619 (= 1,452,804), MISMATCH, exit 1: correct, Kafka has no record left.
+  So 8 Sep = 152,173 rows. Lesson (Percy's NOTES.md): reconcile after every
+  session, inside retention.
+
+**Open cosmetics:** reconcile.py TOTAL line runs the diff into the snowflake
+column on big numbers (widen `>8` to `>12`); it compares totals with zero
+tolerance (fine while quarantine is 0 for the day; add a tolerance or
+subtract quarantine count when junk is injected).
+
+**Teaching notes (16 Oct - 13 Nov):**
+- School has resumed; sessions are short and 2 weeks apart. He asked for
+  "plain simple simple terms". What worked: one analogy per idea (locker /
+  key / doorbell; post room / filing cabinet), full paste-ready code with
+  line comments for new surface, a predicted output block he can diff by eye.
+- Speed mode: he pastes outputs with almost no words. If a prediction is not
+  mentioned, ask once; do not assume.
+- He pasted the whole worksheet into checks.sql, including the one-off
+  UPDATE. Wrong line next to the reason + a full replacement file fixed it in
+  one turn. He applied both fixes without being chased.
+- Mentor predictions wrong this stretch: 9 created, READ success, 9 ledger
+  files, REFRESH would work, latency. Right: UTC clocks, retention deletion,
+  both reconcile runs. Still: COUNT before predicting; read the docs for a
+  function before predicting its output.
+- Web search is disabled by his org; the built-in browser works
+  (docs.snowflake.com is allowed). Library APIs can be checked in his .venv
+  from the mounted folder (strings on the .pyd, grep the connector source).
+- Never run git status in the mounted repo (stale index.lock); git log is ok.
+
+### NEXT (start here): Week 4 close-out, then Week 5 dbt
+
+1. **Oral exam (asked 13 Nov, answers not yet marked if this is a new
+   session).** Five questions, no notes: (1) why S3-then-Snowpipe instead of
+   writing straight to Snowflake; (2) the two halves of the storage
+   integration handshake and what the external ID stops; (3) why REFRESH
+   loaded nothing and what he did instead, and why a second COPY loads 0
+   files; (4) how the 7-hour clock error would have shown up and the fix;
+   (5) what the reconciliation script compares, and why 9 Sep says MISMATCH.
+   Pattern to watch (Week 3): he gives the mechanism and skips the failure it
+   prevents. Interview answers go in STAR form (his standing preference).
+2. Commit if not done: bootstrap.sql, checks.sql, scripts/reconcile.py,
+   TASKS.md, NOTES.md, docs/. README Week 4 section still to write (buckets,
+   IAM-not-root, hadoop-aws, D18, D19, D20, bootstrap-before-trial, REFRESH
+   7-day lesson, latency 672 s with caveat, reconciliation table).
+3. **Week 5 Day 1 (dbt, his comfort zone):** pre-flight `dbt debug
+   --project-dir dbt --profiles-dir dbt` green. Then: `sources.yml` over
+   TFL_DEV.RAW.ARRIVALS with freshness on `snowflake_loaded_at`;
+   `stg_arrivals` that digs the 22 fields out of `raw` and casts them
+   (`raw:line_id::string`, timestamps as timestamp_ntz); tests not_null on
+   keys + the **D20 unique test** on a row fingerprint + the free test
+   `expected_arrival == event_ts + time_to_station` (100 % in Week 3).
+   Predicted row count of stg_arrivals == RAW count (1,624,954 unless new
+   sessions ran). gitignore `dbt/.user.yml`.
+4. **Decision to make early in Week 5 (D21):** how Spark's silver tables
+   (`data/silver/arrivals`, `window_reliability`) reach Snowflake. They are
+   still LOCAL only. Options: write them to the processed bucket + a second
+   stage/COPY; or rebuild silver in dbt SQL from RAW (the Week 10 "engines
+   agree" idea, D17). Present as a two-option table with an honest lean.
+5. Carry-over still open: bronze for tfl.line-status and tfl.disruptions
+   (needed for fct_disruption_lead_time; data must be collected in new
+   sessions, Kafka has none retained); retention.ms on those two topics
+   unconfirmed; compaction (Week 7); per-key gap distribution (lag);
+   check_bronze.py tidy; NOTES.md still shows part of the AWS account number.
+
+### Reference — Day 3 part 2 plan as written 30 Sep (done 16 Oct - 13 Nov, kept for history)
 
 Pre-flight: fresh terminal, venv active, `python -m pytest tests -q` -> 5
 passed; `git log --oneline -1` -> 0d8fd77 or later; `aws s3 ls

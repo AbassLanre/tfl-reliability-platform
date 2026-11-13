@@ -11,7 +11,7 @@ Done when:
 - [x] step 5: snow sql (connection is named tfl; set-default) + dbt debug green
 - [x] step 8: AUTO_INGEST proven 28 Oct: 19,977 new Kafka msgs -> RAW 1,624,954 (+19,977), no manual step
 - [x] step 9: D20 = B (dbt unique test on a row fingerprint in Week 5; detect, do not silently dedupe)
-- [ ] NOTES.md + to_know.md + session_handoff.md updated; commit
+- [ ] to_know.md + session_handoff.md updated by mentor 13 Nov (Percy: review, then commit all)
 
 Key facts (verified this session):
 - Account: BWQDSUN-PF94891, user PERCYABS1, region AWS_EU_WEST_2, student trial 120 days (started 16 Oct 2026)
@@ -31,6 +31,15 @@ Day 4 (28 Oct):
 - [x] latency on 19,977 live rows (LA stamp undone): n 19,977 | min 512 s | p50 584 | p95 672 | max 675; all rows one Snowpipe load at 16:14:31 UTC
       CAVEAT: producer ran first, stream started after -> number includes test-order wait; real figure needs both running together (Week 9)
       mentor predicted p50 180-300 / p95 330-450: WRONG, forgot the serial test order
-- [ ] fix forward: ALTER ACCOUNT SET TIMEZONE='UTC' (add to bootstrap.sql), one-time UPDATE of existing snowflake_loaded_at
-- [ ] reconciliation script: Kafka offsets vs RAW count per hour
-- [ ] Day 5: done-when + oral exam; docs; commit
+- [x] fix forward RUN in Snowflake 28 Oct: ALTER ACCOUNT SET TIMEZONE='UTC' + one-time UPDATE of snowflake_loaded_at (Percy: outputs as predicted)
+- [x] bootstrap.sql: ALTER ACCOUNT SET TIMEZONE = 'UTC'; is line 1 (checked in file 13 Nov)
+- [x] snowflake/checks.sql: 6 read-only checks, no UPDATE/ALTER/COPY, no CONVERT_TIMEZONE (checked in file 13 Nov)
+- [x] reconciliation script: 28 Oct -> 19,977 == 19,977 OK; 9 Sep -> kafka 0 vs snowflake 1,452,804 MISMATCH (expected: Kafka retention)
+      13 Nov VERIFIED: earliest offsets sum = 3,152,505 (8-9 Sep data deleted by 30-d retention, mentor prediction right); latest 3,172,482
+      -> Kafka holds only the 19,977 msgs of 28 Oct; they expire ~27 Nov
+      script = scripts/reconcile.py <YYYY-MM-DD>: Kafka offsets_for_times per hour vs RAW count by ingested_at hour; exit 1 on mismatch
+      APIs checked in Percy's .venv (confluent-kafka 2.15.0 docstring, snowflake-connector 4.6.0 connection_name)
+- [x] Day 5 done-when: stack runs with no manual step (28 Oct) + reconciliation matches (13 Nov)
+- [ ] Day 5 oral exam (5 questions asked 13 Nov)
+- [ ] README Week 4 section (D18, D19, D20, REFRESH lesson, latency with caveat, reconcile table)
+- [ ] cosmetic: reconcile.py diff column width >8 -> >12

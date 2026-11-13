@@ -586,5 +586,72 @@ Trade-off I know: every RAW query is `raw:line_id::string`, not `line_id`.
 **Next:** new trial (Standard / AWS / eu-west-2), run bootstrap.sql twice,
 DESC INTEGRATION, build the IAM role with the external ID, LIST @stage, SQS
 event notification, ALTER PIPE REFRESH -> count 1,604,977, then prove
-AUTO_INGEST with a live run. D20 on orphans.
+AUTO_INGEST with a live run. D20 on orphans. (Done 16 Oct - 13 Nov, below.)
 
+## Week 4 Day 3 part 2 + Day 4 — landing in Snowflake (16 Oct, 28 Oct, 13 Nov 2026)
+
+**Built:** new Snowflake student account (120 days), London region.
+bootstrap.sql run twice. AWS policy `snowflake-tfl-s3-read` + role
+`snowflake-tfl-s3-role` (the handshake). S3 event notification -> Snowpipe.
+`snowflake/checks.sql` (6 read-only health checks). `scripts/reconcile.py`
+(Kafka count vs Snowflake count, hour by hour).
+
+**The numbers:** 1,604,977 in Kafka, local bronze, S3 and Snowflake. Then
+19,977 live messages became 19,977 new rows with no manual step
+(RAW = 1,624,954). Reconcile for 28 Oct: 19,977 == 19,977, diff 0.
+
+**Broke / learned:**
+- The pipe failed on the first bootstrap run. A pipe with AUTO_INGEST tries
+  the key in the lock when it is created; the AWS role did not exist yet.
+  Built the role, ran the same file again, it picked up where it stopped.
+- Handshake in plain words: I tell Snowflake which AWS role to wear.
+  Snowflake tells me who it is (an IAM user) and a password-like external ID.
+  I write both into the role's trust policy. The policy is read-only on one
+  folder, so a leaked integration can read arrivals and nothing else.
+- `ALTER PIPE REFRESH` loaded nothing: it only sees files from the last 7
+  days and mine were 18 days old. Backfill = plain COPY INTO. Second COPY
+  loaded 0 files: Snowflake remembers each file it has loaded.
+- Kafka offsets only compare with Kafka offsets. I subtracted a table row
+  count from an offset once and got nonsense (1,567,505 instead of 19,977).
+- The account clock was Los Angeles. `snowflake_loaded_at` has no timezone
+  written in it, so my rows looked loaded 7 hours BEFORE they were ingested.
+  Pinned the account to UTC in bootstrap.sql and converted the old stamps
+  once. Same lesson as Spark's session timezone in Week 3.
+- First latency number: p95 672 s. Not the pipeline's real speed: I ran the
+  producer first and started Spark after, so rows waited for me. Real number
+  needs both running together. Written down with the caveat.
+- Kafka deleted the September data (30-day retention). Reconcile for 9 Sep
+  says MISMATCH because Kafka has nothing left to compare. So: reconcile
+  right after each session.
+- Rebuild SQL goes in bootstrap.sql; look-only SQL goes in checks.sql;
+  one-off fixes go in NOTES.md and never in a file that gets re-run.
+
+**Decided (D20, mine):** Snowpipe loads whatever file lands, it does not
+read Spark's ledger. I keep the risk documented AND add a dbt uniqueness
+test on RAW in Week 5, so a half-written file shows up as a red test.
+
+**Interview answers (STAR):**
+- *Idempotent setup.* S: my Snowflake trial had expired and the new account
+  was empty. T: rebuild the whole environment without clicking. A: wrote one
+  SQL file with IF NOT EXISTS on every object before creating the account,
+  ran it, the pipe failed because the AWS role was missing, built the role,
+  re-ran the same file. R: second run skipped 8 objects and created the 9th;
+  nothing was recreated, the handshake stayed valid.
+- *Backfill vs live load.* S: 126 Parquet files were already in S3 when the
+  pipe was created. T: load the backlog and prove the live path. A: REFRESH
+  loaded nothing (7-day limit, checked in the docs), so I ran COPY INTO for
+  the backlog and left Snowpipe for new files. R: 1,604,977 rows, a second
+  COPY loaded 0 files, then 19,977 live messages landed on their own.
+- *Timezone bug.* S: latency came out negative by 7 hours. T: find out which
+  clock was wrong. A: compared CURRENT_TIMESTAMP with SYSDATE, found the
+  account default was Los Angeles, pinned UTC in the bootstrap file, fixed
+  the stored stamps once. R: latency query gives the same numbers with and
+  without the conversion; a rebuilt account cannot hit this again.
+- *Completeness check.* S: silent data loss is the failure nobody sees.
+  T: prove every Kafka message reached the warehouse. A: a script that takes
+  Kafka's offsets at each hour boundary and compares with RAW rows per hour,
+  exit code 1 on mismatch. R: 19,977 vs 19,977 for the live day; it also
+  showed me the check only works inside Kafka's 30-day retention.
+
+**Next:** Week 4 oral exam, README Week 4 section, then Week 5 dbt:
+sources + freshness on RAW, stg_arrivals out of the VARIANT, the D20 test.
