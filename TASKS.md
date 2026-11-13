@@ -52,4 +52,5 @@ Known trap: sources.yml lists raw.tube_lines but RAW.TUBE_LINES does NOT exist i
 - [ ] 5.2 fix tube_lines (seed)
 - [ ] 5.3 stg_arrivals: dig 22 fields out of raw VARIANT + cast; row count == RAW (1,624,954)
 - [ ] 5.4 tests: not_null on keys, D20 unique fingerprint, expected_arrival == event_ts + time_to_station
-- [ ] 5.5 D21: how Spark silver reaches Snowflake (processed bucket + stage
+- [ ] 5.5 D21: how Spark silver reaches Snowflake (processed bucket + stage, or rebuild in dbt)
+- [ ] gitignore dbt/.user.yml (tracked today)
