@@ -1,0 +1,8 @@
+version: 2
+
+models:
+  - name: int_arrival_predictions
+    description: One row per distinct TfL prediction (line, vehicle, station, event_ts). Junk vehicle 000 removed.
+    columns:
+      - name: prediction_key
+        data_tests: [unique, not_null]

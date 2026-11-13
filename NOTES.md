@@ -670,3 +670,17 @@ S: Snowpipe can’t see Spark’s commit log, so a file could be loaded twice.
 T: detect it without silently hiding it. 
 A: fingerprinted every row and tested uniqueness. 
 R: it found 4 real duplicates from TfL’s API on the first run, which proved no file had been double-loaded, so I set it to warn for small counts and error above 100.
+
+decided to rebuild silver in dbt from RAW, dbt SQL models do the dedupe and windows on stg_arrivals
+
+Two engines computed the same thing, and I reconciled them
+
+FROM: fetch the rows
+WHERE: throw rows away
+GROUP BY / HAVING: group them
+Window functions (row_number()): number them
+SELECT: pick the columns
+QUALIFY: throw rows away again, now that the numbers exist
+ORDER BY: sort
+
+to_varchar on a timestamp defaults to milliseconds; my key collapsed 55 sub-millisecond pairs. The unique test caught it. Key must be built at the same precision as the dedupe
