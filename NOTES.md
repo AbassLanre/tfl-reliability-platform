@@ -644,7 +644,7 @@ earlier offset was 3,152,505 meaning 19,977 messages were added
 
 19,977 new Kafka messages became 19,977 new RAW rows with no manual step; auto-ingest proven on 28 Oct
 
-“Snowpipe reads the listing, not Spark’s commit log, so I measured the orphan rate (zero over three kill drills) and put a uniqueness test on the raw table so a half-written file would show up as a failed test, not as a wrong number on the dashboard
+Snowpipe reads the listing, not Spark’s commit log, so I measured the orphan rate (zero over three kill drills) and put a uniqueness test on the raw table so a half-written file would show up as a failed test, not as a wrong number on the dashboard
 
 TIMESTAMP_NTZ stores wall-clock in the account’s timezone and forgets the zone; the account default is Los Angeles; pinned the account to UTC, same decision as spark.sql.session.timeZone=UTC in Week 3
 
