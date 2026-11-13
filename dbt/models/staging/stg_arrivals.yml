@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: stg_arrivals
+    description: One row per raw arrival message from RAW.ARRIVALS, fields opened and typed.
+    columns:
+      - name: row_fingerprint
+        description: md5 of the whole raw row. D20 - a file loaded twice shows up here.
+        data_tests: 
+          - not_null
+          - unique:
+              config:
+                warn_if: ">0"
+                error_if: ">100"
+
+      - name: line_id
+        data_tests:
+          - not_null
+          - relationships:                 # every line_id must exist in the tube lines list
+              arguments:
+                to: ref('stg_tube_lines')
+                field: line_id
+
+      - name: event_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['arrival']
+
+      - name: vehicle_id
+        data_tests: [not_null]
+      - name: naptan_id
+        data_tests: [not_null]
+      - name: event_ts
+        data_tests: [not_null]
+      - name: ingested_at
+        data_tests: [not_null]
+      - name: expected_arrival
+        data_tests: [not_null]
+      - name: time_to_station
+        data_tests: [not_null]

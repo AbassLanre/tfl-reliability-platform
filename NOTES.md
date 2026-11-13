@@ -653,3 +653,20 @@ docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server loc
 
 1. S3 has the permannet copy so if snow dies or something wrong happens , i can rebuild from S3, Snowpipe charges per file loaded; writing rows straight in would keep a warehouse switched on all day and it is the sandard pattern to read from s3 
 2. i give snowflake the name of the aws role so it has access to read and snowflake gives me who it is and the external ID, the external ID is the password between my snowflake account and my role on AWS
+
+DBT
+
+keeping elizabeth line in my seed for future expansion
+
+
+source('raw', 'arrivals')->	“Something else put this table here. dbt, just read it.”->	RAW.ARRIVALS, filled by Snowpipe
+
+
+ref('stg_arrivals')->	“dbt built this itself: a model, a seed or a snapshot.”->	stg_arrivals, and every mart built on top of it
+
+when testing the expected arrivals there was an upstream duplicate; the evidence points to TfL repeating an entry within one response
+
+S: Snowpipe can’t see Spark’s commit log, so a file could be loaded twice. 
+T: detect it without silently hiding it. 
+A: fingerprinted every row and tested uniqueness. 
+R: it found 4 real duplicates from TfL’s API on the first run, which proved no file had been double-loaded, so I set it to warn for small counts and error above 100.

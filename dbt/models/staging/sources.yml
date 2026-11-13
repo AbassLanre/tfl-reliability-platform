@@ -5,4 +5,9 @@ sources:
     database: TFL_DEV
     schema: RAW
     tables:
-      - name: tube_lines
+      - name: arrivals
+        config:
+          loaded_at_field: snowflake_loaded_at
+          freshness:
+            warn_after: {count: 30, period: minute}
+            error_after: {count: 2, period: hour}
