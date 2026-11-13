@@ -665,5 +665,27 @@ misses passed on a second go the same day. What I must be able to say:
   role; without it someone else coming through Snowflake could use my role.
 - Same gap as Week 3: I name the thing and skip what breaks without it.
 
-**Next:** README Week 4 section, then Week 5 dbt in a new chat: sources +
-freshness on RAW, stg_arrivals out of the VARIANT, the D20 test.
+## Week 5 session 1 (13 Nov): dbt staging + first intermediate model
+
+- Source freshness: dbt checks the newest snowflake_loaded_at; warn after 30 min,
+  error after 2 h. Red today is CORRECT: nothing has streamed since 28 Oct.
+- YAML needs a space after the colon. `{count:30}` silently became nothing.
+- Seed = small CSV inside the dbt project, loaded by dbt. Right for reference data
+  (tube lines). seeds are ref()'d, not source()'d.
+- Staging = open the envelope and label the pigeonholes: cast and rename only, row count
+  must equal RAW (1,624,954).
+- D20 test fired on real data: 4 duplicates, 30 s apart on one line -> TfL repeating an
+  entry, not a double-loaded file. Alarm tuned: warn on small counts, error above 100.
+- D21 = B: silver rebuilt in dbt. One tested source of truth in the warehouse; Spark is
+  the live engine; Week 10 compares them.
+- WHERE runs before window functions, so you cannot filter on row_number() in WHERE.
+  Use a CTE (works everywhere) or QUALIFY (Snowflake/BigQuery/Databricks).
+- to_varchar(timestamp) defaults to milliseconds. My key collapsed 55 sub-ms pairs; the
+  unique test caught it. Build keys at the same precision as the dedupe.
+
+**STAR: the duplicate detector**
+S: Snowpipe can't see Spark's commit log, so a file could be loaded twice.
+T: detect that without silently hiding it.
+A: fingerprinted every raw row in dbt and put a uniqueness test on it.
+R: first run found 4 real duplicates from TfL's API, which also proved no file had
+been double-loaded; set it to warn for small counts and error above 100.

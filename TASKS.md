@@ -44,13 +44,23 @@ Day 4 (28 Oct):
 - [ ] README Week 4 section (D18, D19, D20, REFRESH lesson, latency with caveat, reconcile table)
 - [ ] cosmetic: reconcile.py diff column width >8 -> >12
 
-## Week 5 — dbt (NOT started; Percy will do it in a new chat. Step 5.1 written out 13 Nov, not run). Week 4 committed as 4f3f639 / 3d35ee8.
-Verified in .venv 13 Nov: dbt-core 1.11.12 wants source `freshness` + `loaded_at_field` under `config:` (top level = deprecation D030).
-Known trap: sources.yml lists raw.tube_lines but RAW.TUBE_LINES does NOT exist in the new account (not in bootstrap.sql).
-  stg_tube_lines will fail on `dbt build` until fixed. Lean: make it a dbt seed from docs/sample_data/tube_line.csv.
-- [ ] 5.1 sources.yml: add raw.arrivals with freshness on snowflake_loaded_at; `dbt source freshness` -> predicted ERROR STALE (last load 2026-10-28 16:14:31 UTC)
-- [ ] 5.2 fix tube_lines (seed)
-- [ ] 5.3 stg_arrivals: dig 22 fields out of raw VARIANT + cast; row count == RAW (1,624,954)
-- [ ] 5.4 tests: not_null on keys, D20 unique fingerprint, expected_arrival == event_ts + time_to_station
-- [ ] 5.5 D21: how Spark silver reaches Snowflake (processed bucket + stage, or rebuild in dbt)
-- [ ] gitignore dbt/.user.yml (tracked today)
+## Week 5 — dbt (started 13 Nov, new chat)
+- [x] 5.1 raw.arrivals freshness (config: loaded_at_field + warn 30 min / error 2 h). ERROR STALE as predicted;
+      max_loaded_at 2026-10-28T16:14:31 UTC. Bug on the way: `{count:30}` (no space) -> YAML read it as one key,
+      dbt said "Nothing to do".
+- [x] 5.2 tube_lines -> dbt seed (dbt/seeds/tube_lines.csv), stg_tube_lines uses ref(). INSERT 12 (mentor said 11:
+      Elizabeth line row, kept as future expansion).
+- [x] 5.3 stg_arrivals view: 20 fields out of the VARIANT (not 22: date/hour are S3 folder names, not in the files).
+      Count 1,624,954 == RAW. Added row_fingerprint = md5(to_varchar(raw)).
+- [x] 5.4 tests: 12 on stg_arrivals. D20 unique fingerprint FIRED: 4 duplicate rows, all piccadilly, 9 Sep,
+      30 s apart (= poll interval), same load -> upstream TfL repeat, NOT a double-loaded file (that would be thousands).
+      Tuned: warn_if >0, error_if >100. Result PASS=12 WARN=1.
+- [x] 5.5 D21 = B: rebuild silver in dbt from RAW; Spark stays the real-time engine; Week 10 reconciles the two.
+- [x] 6.1 int_arrival_predictions (table): Week 3 dedupe key (line_id, vehicle_id, naptan_id, event_ts), '000' removed,
+      CTE + row_number + exclude(rn). 1,068,808 rows (~1.52 copies per prediction; mentor predicted 1.1-1.2M: a bit off).
+      Bug: key used to_varchar(event_ts) = milliseconds only -> 55 sub-ms collisions; fixed with 'YYYY-MM-DD HH24:MI:SS.FF9'.
+      unique + not_null PASS.
+- [ ] 6.2 int_arrivals: one row per train reaching a station. MUST copy the Week 3 session-gap logic from
+      streaming/silver_arrivals.py (mentor reads it first; do not guess).
+- [ ] gitignore dbt/.user.yml
+- [ ] README Week 4 section (still open)

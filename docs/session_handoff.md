@@ -1092,6 +1092,19 @@ subtract quarantine count when junk is injected).
 - Never run git status in the mounted repo (stale index.lock); git log is ok.
 
 ### NEXT (start here): Week 4 close-out, then Week 5 dbt
+### NEXT (start here): Week 5, step 6.2 int_arrivals
+
+Done 13 Nov (session 1 of Week 5): 5.1-5.5 + 6.1, see TASKS.md. dbt state:
+seeds/tube_lines.csv; staging/sources.yml (raw.arrivals with freshness under config:);
+stg_tube_lines, stg_arrivals (+12 tests, fingerprint warn>0/error>100);
+intermediate/int_arrival_predictions (table, 1,068,808 rows, key with FF9).
+dbt 1.11: generic test args go under `arguments:`; use `data_tests:`.
+
+Next: mentor READS streaming/silver_arrivals.py first (session gap logic, completed
+rule lowest_tts <= 60, delay definition) and mirrors it in SQL as int_arrivals, so
+Week 10 "engines agree" compares like with like. Then 5-min windows, then marts.
+Pace: Percy is short on time (school). Full code + plain explanation + prediction,
+one step per message, no detours.
 
 0. **EXAM RESULT 13 Nov: 1 pass / 2 half / 2 miss** (weaker than Week 3's
    3/2/1; three short click-heavy sessions two weeks apart). Q5 reconcile +
