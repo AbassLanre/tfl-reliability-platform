@@ -653,5 +653,17 @@ test on RAW in Week 5, so a half-written file shows up as a red test.
   exit code 1 on mismatch. R: 19,977 vs 19,977 for the live day; it also
   showed me the check only works inside Kafka's 30-day retention.
 
-**Next:** Week 4 oral exam, README Week 4 section, then Week 5 dbt:
-sources + freshness on RAW, stg_arrivals out of the VARIANT, the D20 test.
+**Oral exam (13 Nov, no notes):** 1 pass / 2 half / 2 miss, then both
+misses passed on a second go the same day. What I must be able to say:
+- Why S3 first: S3 is MY permanent copy (I rebuilt 1.6M rows from it with
+  one COPY INTO after the old trial died); Snowpipe bills per file instead of
+  a warehouse left on all day; it is the standard lake + auto-ingest pattern.
+  Snowflake does have its own storage; loaded rows live there.
+- Handshake: I give Snowflake a read-only AWS role name. Snowflake gives me
+  who it is (IAM user) and an external ID. I write both into the role's
+  trust policy. The external ID is the password between my account and my
+  role; without it someone else coming through Snowflake could use my role.
+- Same gap as Week 3: I name the thing and skip what breaks without it.
+
+**Next:** README Week 4 section, then Week 5 dbt in a new chat: sources +
+freshness on RAW, stg_arrivals out of the VARIANT, the D20 test.

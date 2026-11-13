@@ -650,3 +650,6 @@ TIMESTAMP_NTZ stores wall-clock in the account’s timezone and forgets the zone
 
 reconciliation only works inside Kafka’s retention, so run it after every session, not weeks later:
 docker exec -it kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic tfl.arrivals --time -2
+
+1. S3 has the permannet copy so if snow dies or something wrong happens , i can rebuild from S3, Snowpipe charges per file loaded; writing rows straight in would keep a warehouse switched on all day and it is the sandard pattern to read from s3 
+2. i give snowflake the name of the aws role so it has access to read and snowflake gives me who it is and the external ID, the external ID is the password between my snowflake account and my role on AWS

@@ -40,6 +40,16 @@ Day 4 (28 Oct):
       script = scripts/reconcile.py <YYYY-MM-DD>: Kafka offsets_for_times per hour vs RAW count by ingested_at hour; exit 1 on mismatch
       APIs checked in Percy's .venv (confluent-kafka 2.15.0 docstring, snowflake-connector 4.6.0 connection_name)
 - [x] Day 5 done-when: stack runs with no manual step (28 Oct) + reconciliation matches (13 Nov)
-- [ ] Day 5 oral exam (5 questions asked 13 Nov)
+- [x] Day 5 oral exam answered 13 Nov: Q5 pass | Q3, Q4 half | Q1, Q2 miss. Re-drill Q1 + Q2 same day: both PASS (Q1 thin on cost: per-file vs warehouse always on; Q2 left out 'what breaks without the external ID')
 - [ ] README Week 4 section (D18, D19, D20, REFRESH lesson, latency with caveat, reconcile table)
 - [ ] cosmetic: reconcile.py diff column width >8 -> >12
+
+## Week 5 — dbt (NOT started; Percy will do it in a new chat. Step 5.1 written out 13 Nov, not run). Week 4 committed as 4f3f639 / 3d35ee8.
+Verified in .venv 13 Nov: dbt-core 1.11.12 wants source `freshness` + `loaded_at_field` under `config:` (top level = deprecation D030).
+Known trap: sources.yml lists raw.tube_lines but RAW.TUBE_LINES does NOT exist in the new account (not in bootstrap.sql).
+  stg_tube_lines will fail on `dbt build` until fixed. Lean: make it a dbt seed from docs/sample_data/tube_line.csv.
+- [ ] 5.1 sources.yml: add raw.arrivals with freshness on snowflake_loaded_at; `dbt source freshness` -> predicted ERROR STALE (last load 2026-10-28 16:14:31 UTC)
+- [ ] 5.2 fix tube_lines (seed)
+- [ ] 5.3 stg_arrivals: dig 22 fields out of raw VARIANT + cast; row count == RAW (1,624,954)
+- [ ] 5.4 tests: not_null on keys, D20 unique fingerprint, expected_arrival == event_ts + time_to_station
+- [ ] 5.5 D21: how Spark silver reaches Snowflake (processed bucket + stage

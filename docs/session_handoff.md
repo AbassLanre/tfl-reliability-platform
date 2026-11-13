@@ -1093,8 +1093,19 @@ subtract quarantine count when junk is injected).
 
 ### NEXT (start here): Week 4 close-out, then Week 5 dbt
 
-1. **Oral exam (asked 13 Nov, answers not yet marked if this is a new
-   session).** Five questions, no notes: (1) why S3-then-Snowpipe instead of
+0. **EXAM RESULT 13 Nov: 1 pass / 2 half / 2 miss** (weaker than Week 3's
+   3/2/1; three short click-heavy sessions two weeks apart). Q5 reconcile +
+   retention: pass. Q3: knew the 7-day limit, left out COPY INTO and the
+   per-file load memory. Q4: said "timezone mismatch", left out LA default,
+   NTZ, and the bootstrap.sql line. Q1: said "Snowflake doesn't own its own
+   storage" (WRONG: loaded rows live in Snowflake; S3 is HIS copy) and gave
+   none of the three reasons. Q2: could not say who gives what; external ID
+   described as "what connects Snowflake and S3". Model answers were given
+   in plain words. **Re-drill of Q1 + Q2 done the same day: both PASS.**
+   Still thin: Q1 cost half-sentence (Snowpipe bills per file vs a warehouse
+   left on all day); Q2 what breaks without the external ID (someone else
+   coming through Snowflake could use the role). One quick re-ask is enough.
+1. **Oral exam (asked 13 Nov; marked, see item 0).** Five questions, no notes: (1) why S3-then-Snowpipe instead of
    writing straight to Snowflake; (2) the two halves of the storage
    integration handshake and what the external ID stops; (3) why REFRESH
    loaded nothing and what he did instead, and why a second COPY loads 0
@@ -1102,13 +1113,30 @@ subtract quarantine count when junk is injected).
    (5) what the reconciliation script compares, and why 9 Sep says MISMATCH.
    Pattern to watch (Week 3): he gives the mechanism and skips the failure it
    prevents. Interview answers go in STAR form (his standing preference).
-2. Commit if not done: bootstrap.sql, checks.sql, scripts/reconcile.py,
-   TASKS.md, NOTES.md, docs/. README Week 4 section still to write (buckets,
+2. Week 4 code is COMMITTED (4f3f639, 3d35ee8). The handoff/to_know/TASKS
+   edits made after that commit still need committing. README Week 4
+   section still to write (buckets,
    IAM-not-root, hadoop-aws, D18, D19, D20, bootstrap-before-trial, REFRESH
    7-day lesson, latency 672 s with caveat, reconciliation table).
-3. **Week 5 Day 1 (dbt, his comfort zone):** pre-flight `dbt debug
-   --project-dir dbt --profiles-dir dbt` green. Then: `sources.yml` over
-   TFL_DEV.RAW.ARRIVALS with freshness on `snowflake_loaded_at`;
+3. **Week 5 has NOT started. Percy chose (13 Nov) to do all dbt work in a
+   NEW chat.** Step 5.1 was written out for him but not run; nothing in dbt/
+   has been edited. Current dbt/ state: `models/staging/sources.yml` lists
+   only `raw.tube_lines`; `stg_tube_lines.sql` selects from it; staging is
+   materialised as view. **Trap:** RAW.TUBE_LINES does not exist in the new
+   account (never added to bootstrap.sql), so `dbt build` fails on
+   stg_tube_lines until fixed; lean = make it a dbt seed from
+   `docs/sample_data/tube_line.csv`.
+   Verified in his .venv (dbt-core 1.11.12, dbt-snowflake 1.11.6): source
+   `freshness` and `loaded_at_field` go under `config:`; top level raises
+   deprecation D030. Step 5.1 as given: add table `arrivals` to the `raw`
+   source with `config: {loaded_at_field: snowflake_loaded_at, freshness:
+   {warn_after: 30 minute, error_after: 2 hour}}`, then `dbt source
+   freshness --project-dir dbt --profiles-dir dbt --select
+   source:raw.arrivals`. Predicted: ERROR STALE (correct: last load
+   2026-10-28 16:14:31 UTC, no session running); `max_loaded_at` in
+   dbt/target/sources.json shows that timestamp.
+   Then **Week 5 Day 1 (dbt, his comfort zone):** pre-flight `dbt debug
+   --project-dir dbt --profiles-dir dbt` green;
    `stg_arrivals` that digs the 22 fields out of `raw` and casts them
    (`raw:line_id::string`, timestamps as timestamp_ntz); tests not_null on
    keys + the **D20 unique test** on a row fingerprint + the free test
